@@ -374,6 +374,11 @@ class Database:
             conn.execute("DELETE FROM page_loads")
             conn.execute("DELETE FROM sqlite_sequence WHERE name IN ('posts', 'runs', 'page_loads')")
 
+    def lead_counts_by_source(self) -> dict[str, int]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT source_type, COUNT(*) n FROM posts WHERE is_lead=1 GROUP BY source_type")
+            return {r["source_type"]: r["n"] for r in rows}
+
     def stats(self) -> dict[str, Any]:
         with self.connect() as conn:
             total = conn.execute("SELECT COUNT(*) FROM posts").fetchone()[0]

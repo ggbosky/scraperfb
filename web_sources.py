@@ -130,6 +130,7 @@ class WebSources:
     def __init__(self, settings: Settings):
         self.s = settings
         self.client = httpx.Client(timeout=30, headers={"User-Agent": USER_AGENT}, follow_redirects=True)
+        self.errors: dict[str, str] = {}  # poslední chyba podle zdroje ("Reddit", "Freelancer.com")
 
     def close(self) -> None:
         self.client.close()
@@ -153,10 +154,13 @@ class WebSources:
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code == 429:
                     log.warning("Reddit dočasně omezil dotazy – zbytek Redditu přeskakuji do dalšího cyklu")
+                    self.errors["Reddit"] = "Reddit dočasně omezil dotazy (429), zkusí se znovu v dalším kole"
                     break
                 log.warning("Reddit %s: HTTP %s", name, exc.response.status_code)
+                self.errors["Reddit"] = f"{name}: HTTP {exc.response.status_code}"
             except (httpx.HTTPError, ET.ParseError) as exc:
                 log.warning("Reddit %s: %s", name, exc)
+                self.errors["Reddit"] = f"{name}: {exc}"
         return results
 
     def freelancer(self) -> list[tuple[str, list[ScrapedPost]]]:
@@ -169,4 +173,5 @@ class WebSources:
                                                         self.s.freelancer_min_hourly_usd))]
         except (httpx.HTTPError, ValueError) as exc:
             log.warning("Freelancer.com: %s", exc)
+            self.errors["Freelancer.com"] = str(exc)[:200]
             return []

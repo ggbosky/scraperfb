@@ -1,7 +1,7 @@
 """Worker: nekonečná smyčka (Reddit, Freelancer.com, Facebook) → předfiltr → LLM → SQLite → notifikace.
 
 Spuštění:
-  python main.py            # běží trvale (cykly s náhodným rozestupem, jen v aktivních hodinách)
+  python main.py            # běží trvale (Reddit/Freelancer nepřetržitě, Facebook jen v aktivních hodinách)
   python main.py --once     # jeden cyklus a konec (vhodné pro cron / Plánovač úloh)
   python main.py --force    # spustit, i když se zdá, že už jiný worker běží
 """
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import random
@@ -222,29 +223,43 @@ class Worker:
             if outcome not in ("known", "too_old"):
                 log.debug("  %s → %s", post.post_key, outcome)
 
+    def set_source_status(self, source: str, state: str, note: str = "", posts: int = 0, leads: int = 0) -> None:
+        """Stav zdroje pro dashboard (state: ok | error | off | waiting)."""
+        status = json.loads(self.db.get_kv("source_status") or "{}")
+        status[source] = {"state": state, "note": note, "posts": posts, "leads": leads,
+                          "at": to_iso(utcnow())}
+        self.db.set_kv("source_status", json.dumps(status, ensure_ascii=False))
+
     def run_web_sources(self) -> None:
         """Reddit + Freelancer.com – veřejné zdroje, bez přihlášení a bez rizika pro FB účet."""
-        if not (self.s.reddit_enabled or self.s.freelancer_enabled):
-            return
         web = WebSources(self.s)
         try:
-            batches = []
-            if self.s.freelancer_enabled:
-                batches += web.freelancer()
-            if self.s.reddit_enabled:
-                batches += web.reddit(self.db.get_keywords("subreddit"), self.db.get_keywords("search"))
-            for name, posts in batches:
-                self.heartbeat()
-                before = self.pipeline.stats.leads_found
-                self.handle_posts(posts)
-                self.pipeline.stats.sources_scraped += 1
-                log.info("  %s: %d příspěvků, nových leadů %d", name, len(posts),
-                         self.pipeline.stats.leads_found - before)
+            for source, enabled, fetch in (
+                ("Freelancer.com", self.s.freelancer_enabled, web.freelancer),
+                ("Reddit", self.s.reddit_enabled,
+                 lambda: web.reddit(self.db.get_keywords("subreddit"), self.db.get_keywords("search"))),
+            ):
+                if not enabled:
+                    self.set_source_status(source, "off", "vypnuto v .env")
+                    continue
+                found = leads = 0
+                for name, posts in fetch():
+                    self.heartbeat()
+                    before = self.pipeline.stats.leads_found
+                    self.handle_posts(posts)
+                    self.pipeline.stats.sources_scraped += 1
+                    found += len(posts)
+                    leads += self.pipeline.stats.leads_found - before
+                    log.info("  %s: %d příspěvků, nových leadů %d", name, len(posts),
+                             self.pipeline.stats.leads_found - before)
+                error = web.errors.get(source)
+                self.set_source_status(source, "error" if error and not found else "ok",
+                                       error or "", found, leads)
         finally:
             web.close()
 
     # -------------------------------------------------------------- cycle
-    async def run_cycle(self) -> None:
+    async def run_cycle(self, facebook: bool = True) -> None:
         self.pipeline.reload()
         stats = self.pipeline.stats
         run_id = self.db.start_run()
@@ -256,7 +271,13 @@ class Worker:
                 await asyncio.to_thread(self.run_web_sources)
             except Exception:  # noqa: BLE001 – výpadek webového zdroje nesmí zastavit Facebook
                 log.exception("Chyba při čtení Redditu / Freelancer.com")
-            await self.run_facebook(stats)
+            if facebook:
+                await self.run_facebook(stats)
+            else:
+                log.info("Facebook mimo aktivní hodiny (%s–%s) – tento cyklus jen Reddit a Freelancer.com",
+                         self.s.active_hours_start, self.s.active_hours_end)
+                self.set_source_status("Facebook", "waiting", f"mimo aktivní hodiny "
+                                       f"({self.s.active_hours_start}:00–{self.s.active_hours_end}:00)")
         except Exception as exc:  # noqa: BLE001
             error = repr(exc)
             log.exception("Neočekávaná chyba v cyklu")
@@ -267,17 +288,22 @@ class Worker:
     async def run_facebook(self, stats: CycleStats) -> None:
         if self.db.get_kv("fb_paused") == "1":
             log.info("Facebook je pozastavený (%s) – přeskakuji", self.db.get_kv("fb_pause_reason"))
+            self.set_source_status("Facebook", "error", self.db.get_kv("fb_pause_reason") or "pozastaven")
             return
         cooldown = from_iso(self.db.get_kv("cooldown_until"))
         if cooldown and cooldown > utcnow():
             log.info("Facebook v cooldownu po blokaci do %s – přeskakuji", cooldown)
+            self.set_source_status("Facebook", "waiting", f"pauza po omezení účtu do {cooldown:%d.%m. %H:%M} UTC")
             return
         if not self.s.storage_state_path.exists():
             log.info("Facebook není přihlášený (spusť login.bat) – běží jen ostatní zdroje")
+            self.set_source_status("Facebook", "off", "nepřihlášen – spusť login.bat")
             return
         plan = build_plan(self.db, self.s)
         if not plan:
+            self.set_source_status("Facebook", "off", "žádné skupiny ani dotazy")
             return
+        posts_before, leads_before = stats.posts_found, stats.leads_found
         cutoff = utcnow() - timedelta(hours=self.s.max_post_age_hours)
         log.info("Facebook: %d zdrojů", len(plan))
         try:
@@ -308,13 +334,20 @@ class Worker:
                     if i < len(plan) - 1:
                         await self.sleep(random.uniform(self.s.pause_between_sources_min_s,
                                                         self.s.pause_between_sources_max_s))
+            self.set_source_status("Facebook", "ok", "", stats.posts_found - posts_before,
+                                   stats.leads_found - leads_before)
         except RateLimitReached as exc:
             log.warning("⏳ %s – zbytek Facebooku přeskočen", exc)
+            self.set_source_status("Facebook", "waiting", f"{exc} – pokračuje v dalším kole",
+                                   stats.posts_found - posts_before, stats.leads_found - leads_before)
         except SessionExpiredError as exc:
             self.pause_facebook(f"Session vypršela: {exc}")
+            self.set_source_status("Facebook", "error", "přihlášení vypršelo – spusť login.bat")
         except CheckpointError as exc:
             self.pause_facebook(f"Facebook vyžaduje ověření účtu. Přihlas se ručně v prohlížeči a vyřeš ho. ({exc})")
+            self.set_source_status("Facebook", "error", "Facebook chce ověření účtu")
         except BlockedError:
+            self.set_source_status("Facebook", "waiting", "dočasně omezený účet – pauza")
             until = utcnow() + timedelta(hours=self.s.blocked_cooldown_hours)
             self.db.set_kv("cooldown_until", to_iso(until))
             self.notifier.send_alert(f"FB dočasně omezil účet – Facebook pauza do {until:%d.%m. %H:%M} UTC, "
@@ -340,16 +373,11 @@ class Worker:
                 if self.db.get_kv("run_now") == "1":
                     self.db.set_kv("run_now", None)
                     self._run_now = True
-                if not self.in_active_hours() and not self._run_now:
-                    if once:
-                        log.info("Mimo aktivní hodiny (%s–%s) – nic nedělám",
-                                 self.s.active_hours_start, self.s.active_hours_end)
-                        return
-                    await self.sleep(300)
-                    continue
+                # Reddit a Freelancer.com běží nepřetržitě, Facebook jen v aktivních hodinách.
+                facebook = self.in_active_hours() or self._run_now
                 self._run_now = False
 
-                await self.run_cycle()
+                await self.run_cycle(facebook=facebook)
                 if once:
                     return
                 delay = random.uniform(self.s.cycle_interval_min_minutes, self.s.cycle_interval_max_minutes) * 60

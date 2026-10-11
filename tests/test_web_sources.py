@@ -117,7 +117,7 @@ class FakeClassifier:
 
 class FakeWeb:
     def __init__(self, settings):
-        pass
+        self.errors = {}
 
     def freelancer(self):
         return []
@@ -146,6 +146,23 @@ def test_cycle_without_facebook_login_still_finds_reddit_leads(settings, monkeyp
     assert [l["post_key"] for l in leads] == ["reddit:t3_abc123"]
     assert leads[0]["message_url"].endswith("to=bakery_owner")
     assert w.db.get_kv("paused") is None
+    status = json.loads(w.db.get_kv("source_status"))
+    assert status["Reddit"]["state"] == "ok" and status["Reddit"]["leads"] == 1
+    assert status["Freelancer.com"]["state"] == "ok"
+    assert status["Facebook"]["state"] == "off" and "login.bat" in status["Facebook"]["note"]
+
+
+def test_off_hours_cycle_reads_web_sources_but_skips_facebook(settings, monkeypatch):
+    class MustNotRun:
+        def __init__(self, *a, **kw):
+            raise AssertionError("Facebook nemá mimo aktivní hodiny běžet")
+
+    settings.storage_state_path.write_text('{"cookies": [], "origins": []}')
+    monkeypatch.setattr(main, "FacebookScraper", MustNotRun)
+    w = _worker(settings, monkeypatch)
+    asyncio.run(w.run_cycle(facebook=False))
+    assert len(w.db.get_leads()) == 1
+    assert json.loads(w.db.get_kv("source_status"))["Facebook"]["state"] == "waiting"
 
 
 def test_expired_facebook_session_pauses_only_facebook(settings, monkeypatch):

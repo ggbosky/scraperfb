@@ -119,6 +119,9 @@ class PrefilterResult:
     negative_hits: list[str] = field(default_factory=list)
 
 
+_OFFER_TAG_RE = re.compile(r"^\W*[\[(]\s*(?:for hire|offer|offering|available)\s*[\])]")
+
+
 class KeywordPrefilter:
     def __init__(self, topic: list[str], demand: list[str], negative: list[str],
                  min_length: int = 20, max_length: int = 6000):
@@ -144,6 +147,8 @@ class KeywordPrefilter:
         t = normalize(text)
         if any(rx.search(t) for rx in self.spam):
             return PrefilterResult(False, "spam_pattern")
+        if _OFFER_TAG_RE.match(t):  # Reddit: "[For Hire] …" je vždy nabídka služeb
+            return PrefilterResult(False, "offer_tag")
 
         topic = self._hits(self.topic, t)
         if not topic:

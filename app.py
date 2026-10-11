@@ -4,6 +4,7 @@ Spuštění:  streamlit run app.py
 """
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from zoneinfo import ZoneInfo
 
@@ -15,7 +16,7 @@ from config import LEAD_STATUSES, load_settings
 from database import Database, from_iso, utcnow
 from notifier import Notifier, contact_label, contact_url
 
-st.set_page_config(page_title="FB Lead Hunter", page_icon="🎯", layout="wide")
+st.set_page_config(page_title="Lead Hunter", page_icon="🎯", layout="wide")
 
 settings = load_settings()
 TZ = ZoneInfo(settings.timezone)
@@ -54,7 +55,8 @@ def worker_status() -> tuple[str, str]:
 # Sidebar
 # ==========================================================================
 with st.sidebar:
-    st.title("🎯 FB Lead Hunter")
+    st.title("🎯 Lead Hunter")
+    st.caption("Facebook · Reddit · Freelancer.com")
     status, detail = worker_status()
     st.metric("Worker", status, help=detail)
     st.caption(detail)
@@ -95,8 +97,31 @@ with st.sidebar:
                f"{loads_d}/{settings.max_page_loads_per_day} za den")
 
 
+# ==========================================================================
+# Přehled zdrojů
+# ==========================================================================
+SOURCE_FAMILIES = {"Facebook": ("group", "search"), "Reddit": ("reddit",), "Freelancer.com": ("freelancer",)}
+STATE_ICON = {"ok": "🟢", "error": "🔴", "waiting": "🟡", "off": "⚪"}
+source_status = json.loads(db.get_kv("source_status") or "{}")
+lead_counts = db.lead_counts_by_source()
+for col, (name, types) in zip(st.columns(len(SOURCE_FAMILIES)), SOURCE_FAMILIES.items()):
+    info = source_status.get(name)
+    total = sum(lead_counts.get(t, 0) for t in types)
+    with col.container(border=True):
+        if not info:
+            st.markdown(f"**⚪ {name}**")
+            st.caption(f"Čeká na první běh workeru · leadů celkem {total}")
+            continue
+        st.markdown(f"**{STATE_ICON.get(info['state'], '⚪')} {name}**")
+        line = f"Naposledy {fmt_dt(info['at'])}"
+        if info["state"] == "ok" or info["posts"]:
+            line += f" · {info['posts']} příspěvků · nových leadů {info['leads']}"
+        st.caption(f"{line} · leadů celkem {total}")
+        if info.get("note"):
+            st.caption(info["note"])
+
 tab_leads, tab_audit, tab_sources, tab_keywords, tab_system = st.tabs(
-    ["🎯 Leady", "🔍 Audit příspěvků", "👥 Skupiny & hledání", "🔑 Klíčová slova", "⚙️ Systém"]
+    ["🎯 Leady", "🔍 Audit příspěvků", "👥 Zdroje (FB, Reddit, Freelancer)", "🔑 Klíčová slova", "⚙️ Systém"]
 )
 
 # ==========================================================================

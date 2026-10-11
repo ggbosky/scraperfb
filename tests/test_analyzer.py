@@ -43,6 +43,8 @@ def test_prefilter_passes_demand(prefilter, text):
     ("Need a website? I build fast modern sites starting at $299. DM me", "offer_pattern"),
     ("Web developer looking for new clients, open for work 🙂", "offer_pattern"),
     ("Make money online from your website, work from home!", "spam_pattern"),
+    ("[FOR HIRE] Virtual assistant & web designer – need a hand with your website? $15/hr", "offer_tag"),
+    ("(For Hire) Shopify developer, looking for new projects", "offer_tag"),
 ])
 def test_prefilter_rejects(prefilter, text, reason):
     res = prefilter.check(text)
