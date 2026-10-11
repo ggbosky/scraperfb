@@ -9,6 +9,22 @@ echo    FB Lead Hunter - instalace a nastaveni
 echo  =====================================================
 echo.
 
+rem --- 0) Jsme ve slozce s aplikaci? -------------------------------------
+if not exist requirements.txt (
+  echo  Vedle setup.bat chybi soubory aplikace.
+  echo  Nejspis ho spoustis primo ze ZIP souboru - Windows pak rozbali jen tento jeden soubor.
+  echo.
+  echo  Co udelat:
+  echo    1. Zavri toto okno.
+  echo    2. Na stazeny ZIP klikni pravym tlacitkem a zvol "Extrahovat vse..." - potvrd Extrahovat.
+  echo    3. Otevri rozbalenou slozku scraperfb-claude-kind-sagan-gxqs98
+  echo       a teprve tam dvakrat klikni na setup.bat
+  echo.
+  echo  Aktualni slozka: %~dp0
+  pause
+  exit /b 1
+)
+
 rem --- 1) Python ---------------------------------------------------------
 set "PY="
 py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>nul && set "PY=py -3"
