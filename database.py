@@ -31,6 +31,11 @@ CREATE TABLE IF NOT EXISTS posts (
     source_name       TEXT,
     source_url        TEXT,
     author            TEXT,
+    author_url        TEXT,                      -- odkaz na FB profil autora
+    author_id         TEXT,                      -- číselné ID (odkaz do Messengeru)
+    contact_emails    TEXT,                      -- kontakty uvedené v textu (oddělené čárkou)
+    contact_phones    TEXT,
+    contact_websites  TEXT,
     text              TEXT NOT NULL,
     content_hash      TEXT NOT NULL,             -- otisk normalizovaného textu (cross-post dedupe)
     posted_at         TEXT,                      -- ISO 8601 UTC, NULL = neznámé
@@ -105,6 +110,15 @@ CREATE TABLE IF NOT EXISTS kv (
 """
 
 
+# Sloupce přidané v novějších verzích – starší databáze se při startu doplní.
+MIGRATIONS = {
+    "posts": {
+        "author_url": "TEXT", "author_id": "TEXT", "contact_emails": "TEXT",
+        "contact_phones": "TEXT", "contact_websites": "TEXT",
+    },
+}
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -134,6 +148,11 @@ class PostRecord:
     source_name: str | None = None
     source_url: str | None = None
     author: str | None = None
+    author_url: str | None = None
+    author_id: str | None = None
+    contact_emails: str | None = None
+    contact_phones: str | None = None
+    contact_websites: str | None = None
     posted_at: datetime | None = None
     scraped_at: datetime = field(default_factory=utcnow)
 
@@ -164,6 +183,11 @@ class Database:
     def init_schema(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            for table, columns in MIGRATIONS.items():
+                existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+                for name, type_ in columns.items():
+                    if name not in existing:
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {type_}")
 
     def seed_defaults(self) -> None:
         """Při prvním spuštění vloží výchozí klíčová slova a vyhledávací dotazy."""
@@ -198,13 +222,15 @@ class Database:
         with self.connect() as conn:
             cur = conn.execute(
                 """INSERT OR IGNORE INTO posts
-                   (post_key, url, source_type, source_name, source_url, author, text,
+                   (post_key, url, source_type, source_name, source_url, author, author_url,
+                    author_id, contact_emails, contact_phones, contact_websites, text,
                     content_hash, posted_at, scraped_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     post.post_key, post.url, post.source_type, post.source_name, post.source_url,
-                    post.author, post.text, post.content_hash, to_iso(post.posted_at),
-                    to_iso(post.scraped_at),
+                    post.author, post.author_url, post.author_id, post.contact_emails,
+                    post.contact_phones, post.contact_websites, post.text, post.content_hash,
+                    to_iso(post.posted_at), to_iso(post.scraped_at),
                 ),
             )
             return cur.lastrowid if cur.rowcount else None
@@ -285,8 +311,9 @@ class Database:
             sql += " AND COALESCE(posted_at, scraped_at) >= ?"
             params.append(to_iso(since))
         if search:
-            sql += " AND (text LIKE ? OR summary LIKE ? OR author LIKE ? OR source_name LIKE ?)"
-            params += [f"%{search}%"] * 4
+            sql += (" AND (text LIKE ? OR summary LIKE ? OR author LIKE ? OR source_name LIKE ?"
+                    " OR contact_emails LIKE ? OR contact_phones LIKE ?)")
+            params += [f"%{search}%"] * 6
         sql += " ORDER BY COALESCE(posted_at, scraped_at) DESC LIMIT ?"
         params.append(limit)
         with self.connect() as conn:
@@ -327,6 +354,14 @@ class Database:
                 "UPDATE posts SET is_lead=?, reject_reason=? WHERE id=?",
                 (int(is_lead), None if is_lead else "manual_reject", post_id),
             )
+
+    def reset_data(self) -> None:
+        """Smaže příspěvky, leady a historii běhů (skupiny a klíčová slova zůstanou)."""
+        with self.connect() as conn:
+            conn.execute("DELETE FROM posts")
+            conn.execute("DELETE FROM runs")
+            conn.execute("DELETE FROM page_loads")
+            conn.execute("DELETE FROM sqlite_sequence WHERE name IN ('posts', 'runs', 'page_loads')")
 
     def stats(self) -> dict[str, Any]:
         with self.connect() as conn:

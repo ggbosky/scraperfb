@@ -64,9 +64,14 @@ def test_telegram_message_is_escaped(settings):
     ok = n.send_lead({"id": 1, "score": 10, "source_name": "Skupina <A&B>", "author": "Jana",
                       "posted_at": "2026-10-11T10:00:00+00:00", "summary": "Web <b>",
                       "text": "Poptávám web pro <firmu> & spol.", "url": "https://www.facebook.com/groups/1/posts/2/",
-                      "budget": "20k", "urgency": "vysoka"})
+                      "budget": "20k", "urgency": "vysoka", "author_id": "1000123",
+                      "author_url": "https://www.facebook.com/profile.php?id=1000123",
+                      "contact_phones": "777 123 456"})
     assert ok
     msg = sent[0]
     assert msg["chat_id"] == "42" and msg["parse_mode"] == "HTML"
     assert "Skupina &lt;A&amp;B&gt;" in msg["text"] and "&lt;firmu&gt;" in msg["text"]
-    assert msg["reply_markup"]["inline_keyboard"][0][0]["url"].endswith("/posts/2/")
+    buttons = msg["reply_markup"]["inline_keyboard"][0]
+    assert buttons[0]["url"].endswith("/posts/2/")
+    assert buttons[1]["url"] == "https://www.facebook.com/messages/t/1000123"
+    assert "📞 777 123 456" in msg["text"] and 'href="https://www.facebook.com/profile.php?id=1000123"' in msg["text"]

@@ -3,7 +3,7 @@ from datetime import timedelta
 import pytest
 
 from analyzer import (
-    KeywordPrefilter, LLMError, content_hash, decide, extract_json, normalize_analysis,
+    KeywordPrefilter, LLMError, content_hash, decide, extract_contacts, extract_json, normalize_analysis,
 )
 from config import DEFAULT_DEMAND_KEYWORDS, DEFAULT_NEGATIVE_KEYWORDS, DEFAULT_TOPIC_KEYWORDS
 from database import utcnow
@@ -73,7 +73,7 @@ def test_normalize_analysis_offer_never_active():
 
 
 def _analysis(**kw):
-    base = {"intent": "poptavajici", "is_active": True, "relevance_score": 9}
+    base = {"intent": "poptavajici", "is_active": True, "relevance_score": 9, "project_type": "novy_web"}
     base.update(kw)
     return normalize_analysis(base)
 
@@ -86,3 +86,18 @@ def test_decide(settings):
     assert decide(_analysis(is_active=False), now, settings)[1] == "inactive"
     assert decide(_analysis(), now - timedelta(days=10), settings)[1] == "too_old"
     assert decide(_analysis(), None, settings)[0] is True  # ALLOW_UNKNOWN_AGE=true
+    assert decide(_analysis(project_type="Landing page"), now, settings) == (True, None)
+    assert decide(_analysis(project_type="redesign"), now, settings) == (True, None)
+    assert decide(_analysis(project_type="uprava"), now, settings)[1] == "project_type:uprava"
+    assert decide(_analysis(project_type=None), now, settings)[1] == "project_type:neuvedeno"
+
+
+def test_extract_contacts():
+    text = ("Pište na Jana.Novakova@seznam.cz nebo volejte +420 777 123 456, případně 602-111-222. "
+            "Stávající web www.salon-krasa.cz a kavarna.cz/menu. Rozpočet 20 000 Kč, IČO 12345678, "
+            "skupina https://www.facebook.com/groups/1/")
+    c = extract_contacts(text)
+    assert c["emails"] == ["jana.novakova@seznam.cz"]
+    assert c["phones"] == ["+420 777 123 456", "602 111 222"]
+    assert c["websites"] == ["www.salon-krasa.cz", "kavarna.cz/menu"]
+    assert extract_contacts("Rozpočet 150 000 Kč, do 15. 3.") == {"emails": [], "phones": [], "websites": []}

@@ -9,6 +9,36 @@ Leady pak spravuješ ve Streamlit dashboardu.
 - **Data:** SQLite s deduplikací podle ID příspěvku i podle obsahu (stejná poptávka vložená do 5 skupin = 1 lead)
 - **Notifikace:** Telegram bot a/nebo Discord webhook
 - **UI:** Streamlit: leady, stavy (Nekontaktováno / Kontaktováno / Odpověděli / Zamítnuto), skupiny, klíčová slova, audit a testy
+- **Kontakty:** u každého leadu odkaz na FB profil autora, tlačítko „Napsat zprávu“ (Messenger) a telefon, e-mail a web, pokud je autor uvedl v příspěvku. Export do CSV.
+
+Hlásí jen poptávky po **novém webu, e-shopu, landing page nebo redesignu** (`LEAD_PROJECT_TYPES` v `.env`).
+Drobné úpravy, správu webu a SEO vynechává. Když je chceš taky, přidej `uprava,sprava,seo_rychlost`.
+
+## ⚡ Rychlý start
+
+**Co potřebuješ (vše zdarma):**
+
+| | Kde to získáš | Kam to dáš |
+|---|---|---|
+| Počítač s Windows / macOS / Linux, který může běžet celý den | ideálně doma (domácí IP je pro FB nejbezpečnější) | – |
+| Python 3.10+ | [python.org/downloads](https://www.python.org/downloads/), na Windows zaškrtni „Add python.exe to PATH“ | – |
+| FB účet, který je členem skupin, kde se poptávky objevují | tvůj vedlejší účet s historií | `login.bat` / `scraper.py login` |
+| API klíč Groq (LLM) | [console.groq.com/keys](https://console.groq.com/keys), přihlášení Googlem, „Create API Key“ | `LLM_API_KEY` v `.env` |
+| Telegram bot | @BotFather → `/newbot` (návod v kapitole 5) | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` v `.env` |
+| Seznam FB skupin | URL skupin, kde se objevují poptávky | dashboard → Skupiny & hledání |
+
+**Windows:** dvojklik na `install.bat` → vyplň `.env` (Poznámkový blok) → `login.bat` → `start.bat`.
+
+**macOS / Linux:**
+```bash
+./install.sh                       # vytvoří .venv, nainstaluje závislosti a prohlížeč, založí .env
+nano .env                          # vyplň LLM_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+.venv/bin/python scraper.py login  # přihlášení na Facebook v okně prohlížeče
+./start.sh                         # spustí worker + dashboard (http://localhost:8501)
+```
+
+Aplikace startuje s prázdnou databází (všechny statistiky na nule). Kdykoli ji vynuluješ v dashboardu:
+**⚙️ Systém → Začít od nuly**.
 
 ---
 
@@ -63,12 +93,12 @@ SQLite (posts, sources, keywords, runs, page_loads, kv)
 | `analyzer.py` | Předfiltr klíčových slov, LLM klient (Ollama + OpenAI-kompatibilní API), validace výstupu, finální rozhodnutí |
 | `prompts.py` | **System prompt klasifikátoru** (poptávka vs. nabídka vs. diskuse) + šablona dotazu |
 | `database.py` | SQLite: schéma, deduplikace, stavy leadů, zdroje, klíčová slova, log načtení stránek |
-| `notifier.py` | Telegram (HTML zpráva + tlačítko „Otevřít“) a Discord (embed) s retry |
+| `notifier.py` | Telegram (zpráva s kontakty + tlačítka „Příspěvek“ a „Napsat zprávu“) a Discord (embed) s retry |
 | `main.py` | Worker: plánování cyklů, aktivní hodiny, pauzy, cooldown po blokaci, heartbeat |
 | `app.py` | Streamlit dashboard |
 | `config.py` | Konfigurace z `.env` + výchozí klíčová slova |
 | `evaluate.py` | Měření přesnosti předfiltru a LLM na označených vzorcích |
-| `tests/` | 52 testů včetně end-to-end běhu Playwrightu proti napodobenině FB |
+| `tests/` | 62 testů včetně end-to-end běhu Playwrightu proti napodobenině FB |
 
 ### Proč čtení GraphQL a ne jen HTML?
 
@@ -263,6 +293,22 @@ program `C:\cesta\fb-lead-hunter\.venv\Scripts\python.exe`, argumenty `main.py`,
 > Nejlepší je provozovat to na počítači / domácím serveru (Raspberry Pi 5, starý notebook) se stejnou
 > domácí IP, ze které se k účtu běžně přihlašuješ. Datacentrové IP (VPS) jsou pro FB podezřelé. Pokud
 > musíš běžet na VPS, použij rezidenční proxy z ČR (`PROXY=`).
+
+---
+
+### Kontakty na autory
+
+| Údaj | Odkud | Kde ho uvidíš |
+|---|---|---|
+| Jméno + odkaz na FB profil | data příspěvku (autor) | dashboard, notifikace, CSV |
+| „Napsat zprávu“ | `facebook.com/messages/t/<ID autora>`, otevře Messenger s autorem | dashboard, tlačítko v Telegramu |
+| Telefon, e-mail, web | jen pokud je autor sám napsal do příspěvku (rozpoznávají se CZ/SK čísla) | dashboard, notifikace, CSV |
+
+Export: **🎯 Leady → ⬇️ Stáhnout kontakty (CSV)**. Soubor se otevře v Excelu se správnou diakritikou.
+
+Facebook neumožňuje zjistit e-mail ani telefon, který autor nezveřejnil. Pokud v příspěvku chybí, napiš mu
+přes Messenger nebo do komentáře pod poptávkou. Zprávy od lidí, které nemá v přátelích, mu padají do
+„Žádostí o zprávu“, takže komentář „Dobrý den, poslal jsem vám nabídku do zpráv“ zvyšuje šanci na odpověď.
 
 ---
 

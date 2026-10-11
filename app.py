@@ -13,7 +13,7 @@ import streamlit as st
 from analyzer import KeywordPrefilter, LLMClassifier, LLMError, decide
 from config import LEAD_STATUSES, load_settings
 from database import Database, from_iso, utcnow
-from notifier import Notifier
+from notifier import Notifier, messenger_url
 
 st.set_page_config(page_title="FB Lead Hunter", page_icon="🎯", layout="wide")
 
@@ -73,7 +73,8 @@ with st.sidebar:
 
     stats = db.stats()
     st.divider()
-    st.metric("Leady celkem", stats["leads"], delta=f"+{stats['leads_24h']} za 24 h")
+    st.metric("Leady celkem", stats["leads"],
+              delta=f"+{stats['leads_24h']} za 24 h" if stats["leads_24h"] else None)
     st.metric("Nekontaktováno", stats["by_status"].get("Nekontaktováno", 0))
     st.metric("Zpracovaných příspěvků", stats["total_posts"])
     loads_h = db.count_page_loads(utcnow() - timedelta(hours=1))
@@ -95,12 +96,13 @@ with tab_leads:
     min_score = f2.slider("Min. skóre", 1, 10, 1)
     days = f3.selectbox("Období", [1, 3, 7, 14, 30, 90, 3650], index=3,
                         format_func=lambda d: "vše" if d == 3650 else f"{d} dní")
-    search = f4.text_input("Hledat v textu / autorovi / skupině")
+    search = f4.text_input("Hledat (text, autor, skupina, e-mail, telefon)")
 
     leads = db.get_leads(statuses=statuses or None, min_score=min_score,
                          since=utcnow() - timedelta(days=days), search=search.strip())
     if not leads:
-        st.info("Zatím žádné leady pro zvolený filtr. Worker je posílá i na Telegram/Discord hned po nalezení.")
+        st.info("Zatím žádné leady. Jakmile worker (`python main.py`) najde poptávku po novém webu nebo "
+                "redesignu, objeví se tady i s kontaktem na autora a hned ti přijde notifikace.")
     else:
         df = pd.DataFrame([{
             "id": r["id"],
@@ -108,12 +110,14 @@ with tab_leads:
             "Skóre": r["score"],
             "Shrnutí": r["summary"] or r["text"][:120],
             "Stav": r["lead_status"],
+            "Autor": r["author"] or "",
+            "Zpráva": messenger_url(r["author_id"]) or r["author_url"],
+            "Telefon": r["contact_phones"] or "",
+            "E-mail": r["contact_emails"] or "",
             "Odkaz": r["url"],
             "Rozpočet": r["budget"] or "",
             "Termín": r["deadline"] or "",
             "Zdroj": r["source_name"] or "",
-            "Autor": r["author"] or "",
-            "Platforma": r["platform"] or "",
             "Poznámka": r["notes"] or "",
         } for r in leads]).set_index("id")
 
@@ -127,6 +131,8 @@ with tab_leads:
                 "Skóre": st.column_config.ProgressColumn("Skóre", min_value=0, max_value=10, format="%d",
                                                          width="small"),
                 "Odkaz": st.column_config.LinkColumn("Příspěvek", display_text="Otevřít ↗"),
+                "Zpráva": st.column_config.LinkColumn("Kontakt", display_text="Napsat ↗",
+                                                      help="Messenger, případně profil autora"),
                 "Stav": st.column_config.SelectboxColumn("Stav", options=LEAD_STATUSES, required=True),
                 "Shrnutí": st.column_config.TextColumn(width="medium"),
             },
@@ -139,6 +145,17 @@ with tab_leads:
                 st.success("Uloženo")
                 st.rerun()
 
+        export = pd.DataFrame([{
+            "publikovano": fmt_dt(r["posted_at"]), "skore": r["score"], "stav": r["lead_status"],
+            "shrnuti": r["summary"], "autor": r["author"], "profil": r["author_url"],
+            "messenger": messenger_url(r["author_id"]), "telefon": r["contact_phones"],
+            "email": r["contact_emails"], "web": r["contact_websites"], "rozpocet": r["budget"],
+            "termin": r["deadline"], "typ": r["project_type"], "platforma": r["platform"],
+            "skupina": r["source_name"], "prispevek": r["url"], "text": r["text"], "poznamka": r["notes"],
+        } for r in leads])
+        st.download_button("⬇️ Stáhnout kontakty (CSV)", export.to_csv(index=False).encode("utf-8-sig"),
+                           file_name="leady.csv", mime="text/csv")
+
         st.subheader("Detail leadu")
         by_id = {r["id"]: r for r in leads}
         sel = st.selectbox("Vyber lead", list(by_id),
@@ -150,11 +167,28 @@ with tab_leads:
             with c1:
                 st.markdown(f"**{r['summary'] or ''}**")
                 st.text_area("Celý text příspěvku", r["text"], height=220, disabled=True, key=f"txt_{sel}")
+                buttons = st.columns(3)
+                if msg := messenger_url(r["author_id"]):
+                    buttons[0].link_button("💬 Napsat zprávu", msg, type="primary")
+                if r["author_url"]:
+                    buttons[1].link_button("👤 Profil autora", r["author_url"])
                 if r["url"]:
-                    st.link_button("👉 Otevřít příspěvek na Facebooku", r["url"], type="primary")
+                    buttons[2].link_button("👉 Příspěvek", r["url"])
             with c2:
+                st.markdown("**Kontakt**")
+                contact_lines = [f"- 👤 {r['author'] or '—'}"]
+                if r["contact_phones"]:
+                    contact_lines.append(f"- 📞 {r['contact_phones']}")
+                if r["contact_emails"]:
+                    contact_lines.append(f"- 📧 {r['contact_emails']}")
+                if r["contact_websites"]:
+                    contact_lines.append(f"- 🌐 {r['contact_websites']}")
+                if len(contact_lines) == 1:
+                    contact_lines.append("- _Telefon ani e-mail v příspěvku nejsou, napiš přes Messenger "
+                                         "nebo do komentáře._")
+                st.markdown("\n".join(contact_lines))
+                st.markdown("**Poptávka**")
                 st.markdown(
-                    f"- **Autor:** {r['author'] or '—'}\n"
                     f"- **Zdroj:** {r['source_name'] or '—'}\n"
                     f"- **Publikováno:** {fmt_dt(r['posted_at'])} · nalezeno {fmt_dt(r['scraped_at'])}\n"
                     f"- **Typ / platforma:** {r['project_type'] or '—'} / {r['platform'] or '—'}\n"
@@ -325,6 +359,8 @@ with tab_system:
                 "posted_at": None, "budget": "do 20 000 Kč", "deadline": "do konce měsíce",
                 "urgency": "stredni", "project_type": "redesign", "platform": "WordPress",
                 "summary": "Testovací notifikace – redesign webu autoservisu.",
+                "author_url": "https://www.facebook.com/profile.php?id=4", "author_id": "4",
+                "contact_phones": "777 123 456", "contact_emails": "servis@example.cz",
                 "text": "Dobrý den, sháníme někoho na redesign webu našeho autoservisu…",
                 "url": "https://www.facebook.com/",
             })
@@ -333,6 +369,14 @@ with tab_system:
             else:
                 st.error("Odeslání selhalo – zkontroluj .env a log")
         notifier.close()
+
+        st.subheader("🗑️ Začít od nuly")
+        confirm = st.checkbox("Opravdu smazat všechny příspěvky, leady a statistiky "
+                              "(skupiny a klíčová slova zůstanou)")
+        if st.button("Smazat všechna data", disabled=not confirm):
+            db.reset_data()
+            st.success("Hotovo – statistiky jsou na nule.")
+            st.rerun()
 
         st.subheader("🧊 Blokace / cooldown")
         if db.get_kv("cooldown_until"):

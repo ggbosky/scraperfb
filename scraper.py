@@ -88,6 +88,8 @@ class ScrapedPost:
     url: str | None = None
     post_id: str | None = None
     author: str | None = None
+    author_url: str | None = None
+    author_id: str | None = None
     posted_at: datetime | None = None
     source_type: str = "group"
     source_name: str = ""
@@ -144,6 +146,39 @@ def canonical_post_url(url: str | None) -> str | None:
     path = parsed.path if parsed.path.endswith("/") or keep else parsed.path + "/"
     # m.facebook.com / web.facebook.com → jednotná desktopová adresa
     return f"https://www.facebook.com{path}" + (f"?{urlencode(keep)}" if keep else "")
+
+
+_PROFILE_ID_PATTERNS = [
+    re.compile(r"/groups/[^/?#]+/user/(\d+)"),
+    re.compile(r"profile\.php\?(?:.*&)?id=(\d+)"),
+    re.compile(r"facebook\.com/(\d{6,})/?(?:[?#]|$)"),
+]
+
+
+def extract_profile_id(url: str | None) -> str | None:
+    """Číselné ID autora z URL profilu (potřeba pro odkaz do Messengeru)."""
+    if not url:
+        return None
+    for rx in _PROFILE_ID_PATTERNS:
+        m = rx.search(url)
+        if m:
+            return m.group(1)
+    return None
+
+
+def canonical_profile_url(url: str | None) -> str | None:
+    """Čistý odkaz na profil autora (bez sledovacích parametrů)."""
+    if not url or "facebook.com" not in url and not url.startswith("/"):
+        return None
+    if url.startswith("/"):
+        url = "https://www.facebook.com" + url
+    pid = extract_profile_id(url)
+    if pid:
+        return f"https://www.facebook.com/profile.php?id={pid}"
+    path = urlparse(url).path.rstrip("/")
+    if not path or path.startswith(("/groups", "/hashtag", "/events", "/photo", "/watch", "/stories")):
+        return None
+    return f"https://www.facebook.com{path}/"
 
 
 def group_feed_url(url: str) -> str:
@@ -299,10 +334,16 @@ def _match_url(k: str, v: Any) -> str | None:
     return None
 
 
-def _match_author(k: str, v: Any) -> str | None:
+def _match_author(k: str, v: Any) -> dict | None:
     if k == "actors" and isinstance(v, list) and v and isinstance(v[0], dict):
-        name = v[0].get("name")
-        return name if isinstance(name, str) else None
+        actor = v[0]
+        name = actor.get("name")
+        if not isinstance(name, str):
+            return None
+        url = actor.get("url") or actor.get("profile_url")
+        aid = actor.get("id")
+        return {"name": name, "url": url if isinstance(url, str) else None,
+                "id": str(aid) if isinstance(aid, (str, int)) and str(aid).isdigit() else None}
     return None
 
 
@@ -321,8 +362,17 @@ def extract_stories(obj: Any) -> dict[str, dict]:
             "text": _bfs(d, _match_message, _SKIP_TEXT),
             "creation_time": _bfs(d, _match_time, _SKIP_META),
             "url": _bfs(d, _match_url, _SKIP_META),
-            "author": _bfs(d, _match_author, _SKIP_META),
+            "author": None,
+            "author_url": None,
+            "author_id": None,
         }
+        actor = _bfs(d, _match_author, _SKIP_META)
+        if actor:
+            item["author"] = actor["name"]
+            item["author_url"] = canonical_profile_url(actor["url"]) if actor["url"] else None
+            item["author_id"] = actor["id"] or extract_profile_id(actor["url"])
+            if not item["author_url"] and item["author_id"]:
+                item["author_url"] = f"https://www.facebook.com/profile.php?id={item['author_id']}"
         prev = stories.get(pid)
         if prev:
             for key, value in item.items():
@@ -404,6 +454,7 @@ _DOM_EXTRACT_JS = r"""
       timeLabel,
       utime: abbr ? parseInt(abbr.getAttribute('data-utime')) : null,
       author: authorEl ? authorEl.innerText.trim() : null,
+      authorHref: authorEl ? (authorEl.closest('a') || authorEl.querySelector('a') || {}).href || null : null,
     });
   }
   return out;
@@ -765,6 +816,7 @@ class FacebookScraper:
             ts = st.get("creation_time")
             p = ScrapedPost(
                 text=st["text"].strip(), url=url, post_id=st["post_id"], author=st.get("author"),
+                author_url=st.get("author_url"), author_id=st.get("author_id"),
                 posted_at=datetime.fromtimestamp(ts, timezone.utc) if ts else None,
                 source_type=source_type, source_name=source_name, source_url=source_url,
                 origin="graphql",
@@ -782,6 +834,9 @@ class FacebookScraper:
             if key and key in posts:
                 existing = posts[key]
                 existing.author = existing.author or d.get("author")
+                if not existing.author_url and d.get("authorHref"):
+                    existing.author_url = canonical_profile_url(d["authorHref"])
+                    existing.author_id = existing.author_id or extract_profile_id(d["authorHref"])
                 existing.url = existing.url or url
                 continue
             prefix = normalize(text)[:120]
@@ -790,7 +845,10 @@ class FacebookScraper:
             seen_prefixes.add(prefix)
             posted_at = (datetime.fromtimestamp(d["utime"], timezone.utc) if d.get("utime")
                          else parse_fb_time(d.get("timeLabel"), tz=self.s.timezone))
+            href = d.get("authorHref")
             p = ScrapedPost(text=text, url=url, post_id=pid, author=d.get("author"),
+                            author_url=canonical_profile_url(href) if href else None,
+                            author_id=extract_profile_id(href),
                             posted_at=posted_at, source_type=source_type,
                             source_name=source_name, source_url=source_url, origin="dom")
             posts[p.post_key] = p

@@ -18,6 +18,11 @@ log = logging.getLogger(__name__)
 URGENCY_LABEL = {"vysoka": "🔴 vysoká", "stredni": "🟠 střední", "nizka": "🟢 nízká"}
 
 
+def messenger_url(author_id: str | None) -> str | None:
+    """Přímý odkaz na konverzaci s autorem v Messengeru (funguje s číselným ID profilu)."""
+    return f"https://www.facebook.com/messages/t/{author_id}" if author_id else None
+
+
 def _snippet(text: str, limit: int = 600) -> str:
     text = " ".join(text.split())
     return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + " …"
@@ -40,7 +45,7 @@ class Notifier:
         """Pošle lead do všech nakonfigurovaných kanálů. Vrací True, pokud aspoň jeden uspěl."""
         ok = False
         if self.s.telegram_bot_token and self.s.telegram_chat_id:
-            ok |= self._telegram(self._format_telegram(lead), url=lead.get("url"))
+            ok |= self._telegram(self._format_telegram(lead), buttons=self._buttons(lead))
         if self.s.discord_webhook_url:
             ok |= self._discord({"embeds": [self._format_discord(lead)]})
         if not self.enabled:
@@ -61,12 +66,18 @@ class Notifier:
     def _format_telegram(lead: dict[str, Any]) -> str:
         e = html.escape
         posted_at = from_iso(lead.get("posted_at"))
+        author = e(lead.get("author") or "neznámý autor")
+        if lead.get("author_url"):
+            author = f'<a href="{e(lead["author_url"], quote=True)}">{author}</a>'
         lines = [
             f"🔥 <b>Nová poptávka</b> · skóre <b>{lead.get('score')}/10</b>",
             f"📍 {e(lead.get('source_name') or '—')}",
-            f"👤 {e(lead.get('author') or 'neznámý autor')} · 🕒 před {format_age(posted_at)}"
+            f"👤 {author} · 🕒 před {format_age(posted_at)}"
             + ("" if posted_at else " ⚠️ stáří neověřeno"),
         ]
+        for key, icon in (("contact_phones", "📞"), ("contact_emails", "📧"), ("contact_websites", "🌐")):
+            if lead.get(key):
+                lines.append(f"{icon} {e(lead[key])}")
         details = []
         if lead.get("budget"):
             details.append(f"💰 {e(lead['budget'])}")
@@ -82,9 +93,18 @@ class Notifier:
         if lead.get("summary"):
             lines.append(f"\n<b>{e(lead['summary'])}</b>")
         lines.append(f"\n<i>„{e(_snippet(lead.get('text') or ''))}“</i>")
-        if lead.get("url"):
-            lines.append(f'\n🔗 <a href="{e(lead["url"], quote=True)}">Otevřít příspěvek</a>')
         return "\n".join(lines)
+
+    @staticmethod
+    def _buttons(lead: dict[str, Any]) -> list[dict[str, str]]:
+        buttons = []
+        if lead.get("url"):
+            buttons.append({"text": "👉 Příspěvek", "url": lead["url"]})
+        if msg := messenger_url(lead.get("author_id")):
+            buttons.append({"text": "💬 Napsat zprávu", "url": msg})
+        elif lead.get("author_url"):
+            buttons.append({"text": "👤 Profil autora", "url": lead["author_url"]})
+        return buttons
 
     @staticmethod
     def _format_discord(lead: dict[str, Any]) -> dict[str, Any]:
@@ -94,8 +114,16 @@ class Notifier:
             {"name": "Zdroj", "value": (lead.get("source_name") or "—")[:256], "inline": True},
             {"name": "Stáří", "value": f"před {format_age(posted_at)}", "inline": True},
         ]
-        for key, label in (("budget", "💰 Rozpočet"), ("deadline", "⏰ Termín"),
-                           ("platform", "🧩 Platforma"), ("project_type", "Typ")):
+        author = lead.get("author") or "neznámý"
+        if lead.get("author_url"):
+            author = f"[{author}]({lead['author_url']})"
+        if msg := messenger_url(lead.get("author_id")):
+            author += f" · [💬 napsat zprávu]({msg})"
+        fields.append({"name": "👤 Autor", "value": author[:1024], "inline": False})
+        for key, label in (("contact_phones", "📞 Telefon"), ("contact_emails", "📧 E-mail"),
+                           ("contact_websites", "🌐 Web"), ("budget", "💰 Rozpočet"),
+                           ("deadline", "⏰ Termín"), ("platform", "🧩 Platforma"),
+                           ("project_type", "Typ")):
             if lead.get(key):
                 fields.append({"name": label, "value": str(lead[key])[:1024], "inline": True})
         embed: dict[str, Any] = {
@@ -103,7 +131,6 @@ class Notifier:
             "description": _snippet(lead.get("text") or "", 1500),
             "color": 0xE8590C,
             "fields": fields,
-            "footer": {"text": f"Autor: {lead.get('author') or 'neznámý'}"},
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         if lead.get("url"):
@@ -111,15 +138,15 @@ class Notifier:
         return embed
 
     # ------------------------------------------------------------- transport
-    def _telegram(self, text: str, url: str | None = None) -> bool:
+    def _telegram(self, text: str, buttons: list[dict[str, str]] | None = None) -> bool:
         payload: dict[str, Any] = {
             "chat_id": self.s.telegram_chat_id,
             "text": text[:4096],
             "parse_mode": "HTML",
             "disable_web_page_preview": True,
         }
-        if url:
-            payload["reply_markup"] = {"inline_keyboard": [[{"text": "👉 Otevřít na Facebooku", "url": url}]]}
+        if buttons:
+            payload["reply_markup"] = {"inline_keyboard": [buttons]}
         endpoint = f"https://api.telegram.org/bot{self.s.telegram_bot_token}/sendMessage"
         return self._post_with_retry(endpoint, payload, "Telegram")
 

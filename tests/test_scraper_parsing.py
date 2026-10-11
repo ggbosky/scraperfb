@@ -6,8 +6,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 import pytest
 
 from scraper import (
-    canonical_post_url, convert_cookies, extract_post_id, extract_stories, group_feed_url,
-    parse_fb_time, parse_graphql_payload, search_posts_url,
+    canonical_post_url, canonical_profile_url, convert_cookies, extract_post_id, extract_profile_id,
+    extract_stories, group_feed_url, parse_fb_time, parse_graphql_payload, search_posts_url,
 )
 
 NOW = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
@@ -76,7 +76,9 @@ def _story(pid, text, ts, comment_text="komentář", shared=None):
         "feedback": {"comments": [{"body": {"text": comment_text}, "message": {"text": comment_text},
                                    "created_time": 1}]},
         "comet_sections": {
-            "content": {"story": {"actors": [{"name": "Jana Nováková"}], "message": {"text": text}}},
+            "content": {"story": {"actors": [{"name": "Jana Nováková", "id": "100004567",
+                                                "url": "https://www.facebook.com/groups/9/user/100004567/"}],
+                                    "message": {"text": text}}},
             "context_layout": {"story": {"comet_sections": {"metadata": [{"story": {
                 "creation_time": ts,
                 "url": f"https://www.facebook.com/groups/9/posts/{pid}/?__cft__[0]=x"}}]}}},
@@ -99,6 +101,8 @@ def test_extract_stories_from_graphql_like_json():
     assert s["text"] == "Hledám webaře na Shoptet"
     assert s["creation_time"] == 1_760_000_100  # ne čas sdíleného příspěvku
     assert s["author"] == "Jana Nováková"
+    assert s["author_id"] == "100004567"
+    assert s["author_url"] == "https://www.facebook.com/profile.php?id=100004567"
     assert "/posts/222/" in s["url"]
 
 
@@ -122,3 +126,17 @@ def test_convert_cookie_editor_export():
     assert state["cookies"][1]["expires"] == -1 and state["cookies"][1]["sameSite"] == "Lax"
     with pytest.raises(ValueError):
         convert_cookies([raw[2]])
+
+
+@pytest.mark.parametrize("url,pid,canonical", [
+    ("https://www.facebook.com/groups/9/user/1000123/?__cft__[0]=x", "1000123",
+     "https://www.facebook.com/profile.php?id=1000123"),
+    ("https://www.facebook.com/profile.php?id=555666&__tn__=R", "555666",
+     "https://www.facebook.com/profile.php?id=555666"),
+    ("https://www.facebook.com/jana.novakova?__cft__[0]=x", None, "https://www.facebook.com/jana.novakova/"),
+    ("https://www.facebook.com/groups/9/", None, None),
+    ("http://127.0.0.1:8000/#", None, None),
+])
+def test_profile_urls(url, pid, canonical):
+    assert extract_profile_id(url) == pid
+    assert canonical_profile_url(url) == canonical

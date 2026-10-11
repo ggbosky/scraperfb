@@ -1,8 +1,10 @@
 from datetime import timedelta
 
+import sqlite3
+
 import pytest
 
-from database import PostRecord, utcnow
+from database import SCHEMA, Database, PostRecord, utcnow
 
 
 def _rec(key="fb:1", text="Poptávám web", h="h1"):
@@ -57,3 +59,29 @@ def test_reanalysis_queue(db):
     db.mark_analysis_error(pid, "timeout")
     db.mark_analysis_error(pid, "timeout")
     assert db.posts_for_reanalysis(max_attempts=3) == []
+
+
+def test_old_database_is_migrated(tmp_path):
+    path = tmp_path / "old.db"
+    new_cols = ("author_url", "author_id", "contact_emails", "contact_phones", "contact_websites")
+    previous_schema = "\n".join(l for l in SCHEMA.splitlines() if not l.strip().startswith(new_cols))
+    conn = sqlite3.connect(path)
+    conn.executescript(previous_schema)
+    conn.execute("INSERT INTO posts (post_key, text, content_hash, scraped_at) VALUES ('fb:1', 'x', 'h', 'now')")
+    conn.commit()
+    conn.close()
+    Database(path)
+    cols = {r[1] for r in sqlite3.connect(path).execute("PRAGMA table_info(posts)")}
+    assert set(new_cols) <= cols
+    assert sqlite3.connect(path).execute("SELECT post_key FROM posts").fetchall() == [("fb:1",)]
+
+
+def test_reset_data_keeps_sources_and_keywords(db):
+    db.add_source("Skupina", "https://www.facebook.com/groups/1/")
+    db.insert_post(_rec())
+    db.start_run()
+    db.record_page_load("x")
+    db.reset_data()
+    assert db.stats()["total_posts"] == 0 and db.recent_runs() == []
+    assert db.count_page_loads(utcnow() - timedelta(days=1)) == 0
+    assert len(db.list_sources()) == 1 and db.get_keywords("topic")

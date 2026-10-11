@@ -70,6 +70,35 @@ def _compile_keywords(keywords: list[str]) -> list[tuple[str, re.Pattern[str]]]:
 
 
 # --------------------------------------------------------------------------
+# Kontakty uvedené přímo v textu příspěvku
+# --------------------------------------------------------------------------
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}", re.I)
+# CZ/SK čísla: 9 číslic (volitelně +420/+421), mobilní i pevné linky
+_PHONE_RE = re.compile(r"(?<![\d+])(?:(?:\+|00)42[01][\s-]?)?[2-9]\d{2}[\s-]?\d{3}[\s-]?\d{3}(?!\d)")
+_WEB_RE = re.compile(
+    r"(?:https?://|www\.)[^\s<>()\"']+|(?<![@\w.-])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:cz|sk|com|eu|net|org|shop|store|info)\b(?:/[^\s<>()\"']*)?",
+    re.I)
+
+
+def extract_contacts(text: str) -> dict[str, list[str]]:
+    """E-maily, telefony a weby, které autor sám uvedl v příspěvku."""
+    emails = list(dict.fromkeys(m.group(0).rstrip(".").lower() for m in _EMAIL_RE.finditer(text)))
+    phones = []
+    for m in _PHONE_RE.finditer(text):
+        digits = re.sub(r"\D", "", m.group(0))
+        if len(digits) in (9, 12, 14):
+            phones.append(re.sub(r"[\s-]+", " ", m.group(0).strip()))
+    websites = []
+    for m in _WEB_RE.finditer(_EMAIL_RE.sub(" ", text)):
+        w = m.group(0).rstrip(".,;:!?)")
+        if "facebook.com" in w.lower() or "fb.com" in w.lower() or "fb.me" in w.lower():
+            continue
+        websites.append(w)
+    return {"emails": emails, "phones": list(dict.fromkeys(phones)),
+            "websites": list(dict.fromkeys(websites))}
+
+
+# --------------------------------------------------------------------------
 # Fáze A – klíčový předfiltr
 # --------------------------------------------------------------------------
 @dataclass
@@ -185,6 +214,12 @@ def _as_opt_str(value: Any) -> str | None:
     return None if s.lower() in {"", "null", "none", "neuvedeno", "n/a", "-"} else s[:300]
 
 
+def _as_slug(value: Any) -> str | None:
+    """"Landing page" → "landing_page", "Nový web" → "novy_web"."""
+    s = _as_opt_str(value)
+    return re.sub(r"[\s-]+", "_", normalize(s)) if s else None
+
+
 def normalize_analysis(data: dict[str, Any]) -> dict[str, Any]:
     """Validuje a sjednotí výstup LLM – menší modely občas vrací nekonzistentní typy."""
     intent = normalize(str(data.get("intent", "jine"))).replace(" ", "_")
@@ -209,7 +244,7 @@ def normalize_analysis(data: dict[str, Any]) -> dict[str, Any]:
         "intent": intent,
         "is_active": is_active,
         "relevance_score": score,
-        "project_type": _as_opt_str(data.get("project_type")),
+        "project_type": _as_slug(data.get("project_type")),
         "platform": _as_opt_str(data.get("platform")),
         "budget": _as_opt_str(data.get("budget")),
         "deadline": _as_opt_str(data.get("deadline")),
@@ -341,6 +376,8 @@ def decide(analysis: dict[str, Any], posted_at: datetime | None, settings: Setti
         return False, "inactive"
     if analysis["relevance_score"] <= settings.min_relevance_score:
         return False, f"low_score:{analysis['relevance_score']}"
+    if settings.lead_project_types and analysis.get("project_type") not in settings.lead_project_types:
+        return False, f"project_type:{analysis.get('project_type') or 'neuvedeno'}"
     if posted_at is None:
         if not settings.allow_unknown_age:
             return False, "unknown_age"

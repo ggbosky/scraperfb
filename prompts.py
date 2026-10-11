@@ -43,8 +43,14 @@ příspěvek starší než 14 dní (viz metadata "stáří").
 - deadline: termín ("do konce měsíce", "ASAP", "do 15. 3.") nebo null.
 - urgency: "vysoka" (ASAP, spěchá, tento týden, nutně), "stredni" (konkrétní termín v řádu \
 týdnů), "nizka" (bez spěchu), "neuvedeno".
-- project_type: "novy_web" | "eshop" | "redesign" | "uprava" | "landing_page" | "sprava" | \
-"seo_rychlost" | "jine".
+- project_type (vyber jednu hodnotu):
+  "novy_web" = autor chce nový vlastní web (firma, živnost, osobní/portfolio web), i když už \
+nějaký starý má a chce ho nahradit novým;
+  "eshop" = nový e-shop nebo internetový obchod;
+  "landing_page" = jednostránkový web / prodejní stránka;
+  "redesign" = kompletní předělání vzhledu nebo celého stávajícího webu;
+  "uprava" = dílčí úprava stávajícího webu (oprava chyby, nová sekce, napojení pluginu, šablona);
+  "sprava" = průběžná správa/údržba webu; "seo_rychlost" = SEO nebo zrychlení webu; "jine" = ostatní.
 - platform: zmíněná technologie ("WordPress", "Shoptet", "Wix", "Webflow", "WooCommerce", \
 "Upgates", "Shopify", "vlastní kód"…) nebo null.
 - location: město/region, pokud je uvedeno (např. požadavek na osobní schůzku), jinak null.

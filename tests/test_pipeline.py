@@ -11,7 +11,7 @@ class FakeClassifier:
 
     def __init__(self, result=None, fail=False):
         self.result = result or {"intent": "poptavajici", "is_active": True, "relevance_score": 10,
-                                 "summary": "Nový web pro kavárnu"}
+                                 "project_type": "novy_web", "summary": "Nový web pro kavárnu"}
         self.fail = fail
         self.calls = 0
 
@@ -33,7 +33,9 @@ class FakeNotifier:
 
 def _post(pid, text, hours_ago=1, source="Skupina A"):
     return ScrapedPost(text=text, post_id=pid, url=f"https://www.facebook.com/groups/1/posts/{pid}/",
-                       posted_at=utcnow() - timedelta(hours=hours_ago), source_name=source, origin="graphql")
+                       posted_at=utcnow() - timedelta(hours=hours_ago), source_name=source, origin="graphql",
+                       author="Jana", author_id="1000123",
+                       author_url="https://www.facebook.com/profile.php?id=1000123")
 
 
 def test_lead_is_saved_and_notified(db, settings):
@@ -44,6 +46,24 @@ def test_lead_is_saved_and_notified(db, settings):
     assert len(notif.sent) == 1 and notif.sent[0]["notified_at"] is None
     assert db.get_leads()[0]["notified_at"] is not None
     assert p.stats.leads_found == 1 and p.stats.posts_new == 1
+
+
+def test_lead_keeps_author_and_contacts(db, settings):
+    notif = FakeNotifier()
+    p = Pipeline(db, settings, FakeClassifier(), notif)
+    p.handle(_post("5", "Poptávám nový web pro autoservis, volejte 777 123 456 nebo servis@example.cz"))
+    lead = notif.sent[0]
+    assert lead["author_id"] == "1000123" and lead["author_url"].endswith("id=1000123")
+    assert lead["contact_phones"] == "777 123 456" and lead["contact_emails"] == "servis@example.cz"
+
+
+def test_small_fixes_are_not_leads_by_default(db, settings):
+    notif = FakeNotifier()
+    clf = FakeClassifier({"intent": "poptavajici", "is_active": True, "relevance_score": 10,
+                          "project_type": "uprava"})
+    p = Pipeline(db, settings, clf, notif)
+    assert p.handle(_post("6", "Potřebuji opravit kontaktní formulář na webu, kdo pomůže?")) == "project_type:uprava"
+    assert notif.sent == []
 
 
 def test_offer_and_old_posts_never_reach_llm(db, settings):
@@ -66,7 +86,7 @@ def test_crosspost_is_detected_as_duplicate(db, settings):
 def test_low_score_and_llm_error_with_retry(db, settings):
     notif = FakeNotifier()
     p = Pipeline(db, settings, FakeClassifier({"intent": "poptavajici", "is_active": True,
-                                               "relevance_score": 8}), notif)
+                                               "relevance_score": 8, "project_type": "novy_web"}), notif)
     assert p.handle(_post("20", "Hledám někoho na úpravu webu, kolik by to stálo?")) == "low_score:8"
 
     p.classifier = FakeClassifier(fail=True)

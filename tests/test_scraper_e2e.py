@@ -19,7 +19,9 @@ def _story(pid: str, text: str, ts: int) -> dict:
     return {
         "__typename": "Story", "post_id": pid,
         "comet_sections": {
-            "content": {"story": {"actors": [{"name": f"Autor {pid}"}], "message": {"text": text}}},
+            "content": {"story": {"actors": [{"name": f"Autor {pid}", "id": f"9{pid}",
+                                                "url": f"https://www.facebook.com/groups/9/user/9{pid}/"}],
+                                    "message": {"text": text}}},
             "context_layout": {"story": {"comet_sections": {"metadata": [{"story": {
                 "creation_time": ts, "url": f"https://www.facebook.com/groups/9/posts/{pid}/"}}]}}},
         },
@@ -34,7 +36,7 @@ PAGE = f"""<!doctype html><html><body>
 <div role="feed">
   <div><div data-ad-rendering-role="story_message">SSR: poptávám tvorbu webu pro pekárnu</div>
        <a href="/groups/9/posts/100/">2 h</a></div>
-  <div><h3><a href="#">Petr Dom</a></h3>
+  <div><h3><a href="https://www.facebook.com/petr.dom?__cft__[0]=x">Petr Dom</a></h3>
        <div data-ad-rendering-role="story_message">Jen v DOM: sháním webaře na Wix, kdo pomůže?</div>
        <a href="/groups/9/posts/999/?__cft__[0]=x" aria-label="3 h">3 h</a>
        <div role="button" onclick="this.parentElement.querySelector('[data-ad-rendering-role]').innerText += ' (celý text)'">Zobrazit víc</div>
@@ -117,11 +119,14 @@ def test_scrape_source_end_to_end(settings, server, monkeypatch):
     assert not webdriver  # stealth skryl navigator.webdriver
     assert "fb:100" in by_key and by_key["fb:100"].posted_at is not None  # SSR + GraphQL sloučeno
     assert by_key["fb:100"].author == "Autor 100"
+    assert by_key["fb:100"].author_id == "9100"
+    assert by_key["fb:100"].author_url == "https://www.facebook.com/profile.php?id=9100"
     assert any(k.startswith("fb:20") for k in by_key)  # odchycené GraphQL odpovědi
     dom = by_key["fb:999"]  # jen v DOM
     assert dom.origin == "dom"
     assert dom.url == "https://www.facebook.com/groups/9/posts/999/"
     assert dom.author == "Petr Dom"
+    assert dom.author_url == "https://www.facebook.com/petr.dom/"
     assert "(celý text)" in dom.text  # "Zobrazit víc" bylo rozbaleno
     assert dom.posted_at is not None  # čas z aria-label "3 h"
     assert len([p for p in posts if "pekárnu" in p.text]) == 1  # žádné duplicity

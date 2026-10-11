@@ -100,6 +100,7 @@ class Settings:
     max_post_age_hours: int
     allow_unknown_age: bool
     min_relevance_score: int  # lead musí mít skóre STRIKTNĚ větší než tato hodnota
+    lead_project_types: tuple[str, ...]  # prázdné = všechny typy projektů
 
     # --- LLM ---------------------------------------------------------------
     llm_provider: str
@@ -161,6 +162,9 @@ def load_settings() -> Settings:
         max_post_age_hours=_int("MAX_POST_AGE_HOURS", 72),
         allow_unknown_age=_bool("ALLOW_UNKNOWN_AGE", True),
         min_relevance_score=_int("MIN_RELEVANCE_SCORE", 8),
+        lead_project_types=tuple(
+            t.strip() for t in _str("LEAD_PROJECT_TYPES", "novy_web,eshop,landing_page,redesign").split(",")
+            if t.strip()),
         llm_provider=provider,
         llm_base_url=(_str("LLM_BASE_URL") or preset["base_url"]).rstrip("/"),
         llm_api_key=_str("LLM_API_KEY"),

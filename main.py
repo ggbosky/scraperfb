@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from zoneinfo import ZoneInfo
 
-from analyzer import KeywordPrefilter, LLMClassifier, LLMError, decide
+from analyzer import KeywordPrefilter, LLMClassifier, LLMError, decide, extract_contacts
 from config import Settings, load_settings
 from database import Database, PostRecord, from_iso, to_iso, utcnow
 from notifier import Notifier
@@ -85,10 +85,15 @@ class Pipeline:
     def handle(self, post: ScrapedPost) -> str:
         """Uloží nový příspěvek a vyhodnotí ho. Vrací výsledek pro log."""
         self.stats.posts_found += 1
+        contacts = extract_contacts(post.text)
         record = PostRecord(
             post_key=post.post_key, text=post.text, content_hash=post.content_hash, url=post.url,
             source_type=post.source_type, source_name=post.source_name, source_url=post.source_url,
-            author=post.author, posted_at=post.posted_at,
+            author=post.author, author_url=post.author_url, author_id=post.author_id,
+            contact_emails=", ".join(contacts["emails"]) or None,
+            contact_phones=", ".join(contacts["phones"]) or None,
+            contact_websites=", ".join(contacts["websites"]) or None,
+            posted_at=post.posted_at,
         )
         post_id = self.db.insert_post(record)
         if post_id is None:
