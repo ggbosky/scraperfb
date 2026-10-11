@@ -1,6 +1,7 @@
 # 🎯 FB Lead Hunter
 
-Bezplatná alternativa k Apify: hlídá Facebook skupiny a FB vyhledávání, najde **aktivní poptávky po tvorbě nebo úpravě webu**,
+Bezplatná alternativa k Apify: hlídá Facebook skupiny a FB vyhledávání, najde **aktivní poptávky po tvorbě nebo redesignu webu**
+(ve výchozím nastavení **anglicky psané poptávky ze zahraničí**, přepnutelné na české),
 vyřadí nabídky služeb, spam a staré příspěvky a do pár sekund ti pošle upozornění na Telegram nebo Discord.
 Leady pak spravuješ ve Streamlit dashboardu.
 
@@ -27,7 +28,18 @@ Drobné úpravy, správu webu a SEO vynechává. Když je chceš taky, přidej `
 | Telegram bot | @BotFather → `/newbot` (návod v kapitole 5) | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` v `.env` |
 | Seznam FB skupin | URL skupin, kde se objevují poptávky | dashboard → Skupiny & hledání |
 
-**Windows:** dvojklik na `install.bat` → vyplň `.env` (Poznámkový blok) → `login.bat` → `start.bat`.
+**Windows:** dvojklik na **`setup.bat`**. Když chybí Python, nainstaluje ho. Pak nainstaluje aplikaci a spustí
+průvodce (`setup_wizard.py`), který se postupně zeptá na všechno potřebné:
+
+1. odkud chceš klienty (zahraničí / Česko),
+2. Gemini API klíč (otevře stránku, klíč ověří a sám vybere nejnovější fungující model),
+3. najde Google Chrome (bezpečnější otisk) nebo použije vestavěný prohlížeč,
+4. otevře okno pro přihlášení na Facebook,
+5. otevře vyhledávání vhodných skupin, načte skupiny, ve kterých jsi členem, a vybereš čísly, které hlídat,
+6. volitelně nastaví spuštění po zapnutí PC a hned aplikaci spustí.
+
+Další spuštění: `start.bat`. Doplnění skupin (např. po schválení žádostí o členství): `groups.bat`.
+Nové přihlášení na FB: `login.bat`.
 
 **macOS / Linux:**
 ```bash
@@ -98,7 +110,9 @@ SQLite (posts, sources, keywords, runs, page_loads, kv)
 | `app.py` | Streamlit dashboard |
 | `config.py` | Konfigurace z `.env` + výchozí klíčová slova |
 | `evaluate.py` | Měření přesnosti předfiltru a LLM na označených vzorcích |
-| `tests/` | 62 testů včetně end-to-end běhu Playwrightu proti napodobenině FB |
+| `setup_wizard.py` | Průvodce nastavením (AI klíč, prohlížeč, FB přihlášení, výběr skupin, autostart) |
+| `setup.bat`, `start.bat`, `login.bat`, `groups.bat` | Instalace a spouštění na Windows dvojklikem |
+| `tests/` | 78 testů včetně end-to-end běhu Playwrightu proti napodobenině FB |
 
 ### Proč čtení GraphQL a ne jen HTML?
 
@@ -296,6 +310,18 @@ program `C:\cesta\fb-lead-hunter\.venv\Scripts\python.exe`, argumenty `main.py`,
 
 ---
 
+### Zahraniční klienti
+
+- Klíčová slova pokrývají češtinu i angličtinu. `TARGET_MARKET=international` přepne FB Search na anglické dotazy
+  („looking for web designer“, „need a website for my business“, …).
+- AI hodnotí příspěvky v jakémkoli jazyce, shrnutí a zdůvodnění píše česky.
+- Poptávky, které vyžadují **místního dodavatele** („local only“, „must be based in Texas“), dostanou max. 7 bodů.
+  Na dálku je nezískáš, proto se nehlásí.
+- **Podvody** typu „my consultant has the content, I will pay by check“ (známý podvod s přeplacením) AI označí jako spam.
+- Aktivní hodiny 9:00–1:00 našeho času pokrývají pracovní den v USA i Evropě.
+- Nejlepší skupiny pro zahraniční klienty jsou skupiny **majitelů firem** (small business owners, Shopify store owners,
+  realitní makléři, koučové…). Ve skupinách typu „web design jobs“ je hodně konkurence. Průvodce otevře vyhledávání obou typů.
+
 ### Kontakty na autory
 
 | Údaj | Odkud | Kde ho uvidíš |
@@ -316,7 +342,7 @@ přes Messenger nebo do komentáře pod poptávkou. Zprávy od lidí, které nem
 
 | Opatření | Jak je implementováno |
 |---|---|
-| **Konzistentní otisk** | Stejný User-Agent, viewport, `cs-CZ`, `Europe/Prague` při každém běhu i při loginu. Náhodné střídání UA je naopak podezřelé. |
+| **Konzistentní otisk** | User-Agent odvozený ze skutečné verze prohlížeče a systému, stejný viewport, `cs-CZ`, `Europe/Prague` při každém běhu i při loginu. Náhodné střídání UA je naopak podezřelé. |
 | **Stealth** | `playwright-stealth` (skrývá `navigator.webdriver`, doplní pluginy, WebGL, `chrome.runtime`…) + `--disable-blink-features=AutomationControlled`. Volitelně skutečný Chrome (`BROWSER_CHANNEL=chrome`). |
 | **Lidské chování** | Skrolování kolečkem po nerovnoměrných krocích, pohyby myši, občasné vrácení nahoru, pauzy 2–5 s, občas 6–14 s „čtení“, rozehřátí na hlavním feedu na začátku cyklu. |
 | **Rozložení v čase** | Cykly po 20–40 min s náhodným rozptylem, pauza 40–120 s mezi skupinami, náhodné pořadí zdrojů, jen v aktivních hodinách. |

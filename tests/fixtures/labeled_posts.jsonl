@@ -20,3 +20,13 @@
 {"text": "Vydělávej až 50 000 měsíčně z domova! Web s návodem najdeš v odkazu, bitcoin investice.", "intent": "spam", "lead": false}
 {"text": "Sháním někoho na správu Instagramu a FB reklamy pro náš e-shop.", "intent": "jine", "lead": false}
 {"text": "Prosím o cenovou nabídku na nový web pro autoservis, stávající je z roku 2012 a nefunguje na mobilu.", "intent": "poptavajici", "lead": true}
+{"text": "Hi everyone! I'm looking for someone to redesign our dental clinic website (WordPress). It looks outdated and isn't mobile friendly. Budget around $2,000.", "intent": "poptavajici", "lead": true}
+{"text": "Can anyone recommend a good web designer? I need a simple 5-page website for my cleaning business.", "intent": "poptavajici", "lead": true}
+{"text": "Looking for a Shopify developer to build our new online store. We have products and branding ready. DM me with your portfolio.", "intent": "poptavajici", "lead": true}
+{"text": "ISO a web developer to rebuild my real estate website, current one is on Wix and I want something more professional. Willing to pay well.", "intent": "poptavajici", "lead": true}
+{"text": "Need someone to build a landing page for my coaching program ASAP, budget $500-800.", "intent": "poptavajici", "lead": true}
+{"text": "Need a website for your business? 🚀 I build fast, modern sites starting at $299. DM me for a free quote!", "intent": "nabizejici", "lead": false}
+{"text": "Web developer here, open for new projects! Check my portfolio in the comments.", "intent": "nabizejici", "lead": false}
+{"text": "I need a website for my new business. My consultant has the content and logo ready. I will pay by check. Please email me your quote.", "intent": "spam", "lead": false}
+{"text": "Looking for a LOCAL web designer in Austin, TX only - must be able to meet in person weekly.", "intent": "poptavajici", "lead": false}
+{"text": "What's better for a small business site, Squarespace or WordPress? I'm planning to do it myself.", "intent": "diskuse", "lead": false}

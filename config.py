@@ -45,19 +45,13 @@ LLM_PRESETS: dict[str, dict[str, str]] = {
     "openai": {"base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini"},
     "gemini": {
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "model": "gemini-2.0-flash",
+        "model": "gemini-2.5-flash",
     },
     "openrouter": {
         "base_url": "https://openrouter.ai/api/v1",
         "model": "meta-llama/llama-3.3-70b-instruct:free",
     },
 }
-
-DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
-)
-
 
 @dataclass(frozen=True)
 class Settings:
@@ -111,6 +105,7 @@ class Settings:
     llm_timeout_s: float
     llm_max_requests_per_minute: int
     llm_max_input_chars: int
+    llm_max_tokens: int
 
     # --- Notifikace --------------------------------------------------------
     telegram_bot_token: str
@@ -137,15 +132,15 @@ def load_settings() -> Settings:
         headless=_bool("HEADLESS", True),
         browser_channel=_str("BROWSER_CHANNEL", ""),
         browser_executable_path=_str("BROWSER_EXECUTABLE_PATH", ""),
-        user_agent=_str("USER_AGENT") or DEFAULT_USER_AGENT,
+        user_agent=_str("USER_AGENT"),  # prázdné = odvodí se ze skutečné verze prohlížeče
         locale=_str("BROWSER_LOCALE", "cs-CZ"),
         timezone=_str("BROWSER_TIMEZONE", "Europe/Prague"),
         viewport_width=_int("VIEWPORT_WIDTH", 1366),
         viewport_height=_int("VIEWPORT_HEIGHT", 768),
         proxy=_str("PROXY", ""),
         block_media=_bool("BLOCK_MEDIA", True),
-        active_hours_start=_int("ACTIVE_HOURS_START", 7),
-        active_hours_end=_int("ACTIVE_HOURS_END", 23),
+        active_hours_start=_int("ACTIVE_HOURS_START", 9),
+        active_hours_end=_int("ACTIVE_HOURS_END", 1),  # přes půlnoc – USA píšou odpoledne a večer našeho času
         cycle_interval_min_minutes=_int("CYCLE_INTERVAL_MIN_MINUTES", 20),
         cycle_interval_max_minutes=_int("CYCLE_INTERVAL_MAX_MINUTES", 40),
         pause_between_sources_min_s=_float("PAUSE_BETWEEN_SOURCES_MIN_S", 40),
@@ -173,6 +168,7 @@ def load_settings() -> Settings:
         llm_timeout_s=_float("LLM_TIMEOUT_S", 90),
         llm_max_requests_per_minute=_int("LLM_MAX_REQUESTS_PER_MINUTE", 20),
         llm_max_input_chars=_int("LLM_MAX_INPUT_CHARS", 3500),
+        llm_max_tokens=_int("LLM_MAX_TOKENS", 2048),
         telegram_bot_token=_str("TELEGRAM_BOT_TOKEN"),
         telegram_chat_id=_str("TELEGRAM_CHAT_ID"),
         discord_webhook_url=_str("DISCORD_WEBHOOK_URL"),
@@ -193,6 +189,9 @@ DEFAULT_TOPIC_KEYWORDS = [
     "wix", "webflow", "elementor", "joomla", "drupal", "framer",
     "landing page", "microsite", "redesign", "webhosting",
     "website", "web developer", "frontend", "kodér", "koder",
+    # EN
+    "site", "online store", "ecommerce", "e-commerce", "squarespace", "bigcommerce", "revamp",
+    "homepage", "home page", "web dev",
 ]
 
 # Poptávka: signál, že autor něco SHÁNÍ (stačí 1 shoda).
@@ -203,13 +202,21 @@ DEFAULT_DEMAND_KEYWORDS = [
     "cenovou nabidku", "cenova nabidka", "za kolik", "kolik stoji", "kolik by stal",
     "kolik si rikate", "zakazk", "subdodavatel", "spolupraci na", "ozve se nekdo",
     "pomuze nekdo", "pomohl by", "pomohla by", "predelat", "upravit web", "uprava webu",
-    "looking for", "need a", "need someone", "hiring", "recommend",
+    # EN
+    "looking for", "need a", "need an", "need someone", "need help", "in need of", "seeking",
+    "hiring", "searching for", "anyone know", "anyone recommend", "can anyone", "could anyone",
+    "does anyone", "recommend", "who can", "who could", "quote", "how much would", "how much does",
+    "how much should", "budget", "willing to pay", "paid project", "build me", "build my", "redo my",
+    "revamp my", "update my website", "fix my website", "want a website", "want to build",
+    "would like a website",
 ]
 
 # Silná poptávka – přebije nalezený "nabízecí" vzor (např. "Hledám webaře, nabízím 20k").
 STRONG_DEMAND_KEYWORDS = [
     "poptav", "hledam", "hledame", "shanim", "shanime", "potrebuji", "potrebujeme",
-    "potreboval bych", "potrebovala bych", "doporucte", "doporucite", "looking for",
+    "potreboval bych", "potrebovala bych", "doporucte", "doporucite",
+    "looking for", "need a", "need an", "need someone", "in need of", "seeking", "hiring",
+    "searching for", "can anyone recommend", "any recommendations",
 ]
 
 # Nabídky služeb / spam – při shodě (a bez silné poptávky) se příspěvek zahodí bez LLM.
@@ -222,24 +229,66 @@ DEFAULT_NEGATIVE_KEYWORDS = [
     "moje portfolio", "nase portfolio", "reference na", "napiste mi do sz", "piste do sz",
     "levne weby", "web na klic za", "akcni cena", "sleva na tvorbu", "zdarma do portfolia",
     "hledam praci", "hledam brigadu", "hledam klienty", "hledam nove klienty", "hledame klienty",
-    "hledame nove klienty", "nabizim se", "i will create", "i can build",
-    "our agency", "we offer", "dm me", "check my profile",
+    "hledame nove klienty", "nabizim se",
+    # EN – nabídky služeb (anglické skupiny jsou jimi zahlcené)
+    "i will create", "i will build", "i will design", "i will develop", "i can build", "i can create",
+    "i can design", "i build websites", "i design websites", "i create websites", "i make websites",
+    "we build websites", "we design websites", "we create websites", "our agency", "our team can",
+    "we offer", "i offer", "my portfolio", "our portfolio", "check my portfolio", "check my profile",
+    "open for work", "available for work", "available for new projects", "taking new clients",
+    "accepting new clients", "looking for clients", "looking for new clients", "looking for work",
+    "looking for a job", "looking for projects", "looking for new projects", "need a website?",
+    "need a new website?", "need a website for your", "need a new website for your", "for your business?",
+    "i build", "we build", "i design", "we design", "i develop", "we develop",
+    "affordable website", "cheap website", "website for only", "starting at $",
+    "starting from $", "limited offer", "fiverr.com", "upwork.com/freelancers",
 ]
 
 # Spam, který se zahazuje VŽDY.
 SPAM_PATTERNS = [
     r"wa\.me/", r"t\.me/", r"\bcrypto\b", r"\bbitcoin\b", r"\bforex\b", r"\binvestic",
     r"prace z domova", r"vydelek az", r"pasivni prijem", r"\bmlm\b", r"\bbinance\b",
+    r"make money online", r"work from home", r"earn \$?\d+ (?:daily|per day|a day)", r"sugar (?:daddy|mommy)",
 ]
 
+# Cílový trh: "international" (anglické poptávky ze zahraničí) nebo "cz".
+TARGET_MARKET = _str("TARGET_MARKET", "international").lower()
+
 # Dotazy pro FB Search (vyhledávání příspěvků, filtr "Nejnovější").
-DEFAULT_SEARCH_QUERIES = [
-    "poptávám tvorbu webu",
-    "hledám webaře",
-    "hledám webdesignera",
-    "poptávám e-shop",
-    "redesign webu poptávka",
-    "shoptet hledám",
-]
+SEARCH_QUERIES = {
+    "international": [
+        "looking for web designer",
+        "need a website for my business",
+        "looking for someone to build a website",
+        "website redesign needed",
+        "looking for wordpress developer",
+        "need a shopify developer",
+        "hiring web developer",
+        "recommend a web designer",
+    ],
+    "cz": [
+        "poptávám tvorbu webu",
+        "hledám webaře",
+        "hledám webdesignera",
+        "poptávám e-shop",
+        "redesign webu poptávka",
+        "shoptet hledám",
+    ],
+}
+DEFAULT_SEARCH_QUERIES = SEARCH_QUERIES.get(TARGET_MARKET, SEARCH_QUERIES["international"])
+
+# Hledané výrazy pro nalezení vhodných FB skupin (průvodce je otevře v prohlížeči).
+GROUP_SEARCH_TERMS = {
+    "international": [
+        "small business owners", "entrepreneurs", "startup founders", "shopify store owners",
+        "ecommerce entrepreneurs", "wordpress help", "website design help", "hire web developer",
+        "web design jobs", "freelance web developer jobs", "local business owners usa",
+        "small business uk", "small business australia", "real estate agents", "coaches and consultants",
+    ],
+    "cz": [
+        "podnikatelky", "podnikatelé", "živnostníci", "OSVČ", "začínající podnikatelé", "e-shopy",
+        "shoptet", "wordpress čeština", "malé firmy", "podnikání",
+    ],
+}
 
 LEAD_STATUSES = ["Nekontaktováno", "Kontaktováno", "Odpověděli", "Zamítnuto"]

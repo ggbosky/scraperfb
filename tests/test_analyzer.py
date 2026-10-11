@@ -21,6 +21,10 @@ def prefilter():
     "Hledám webaře, nabízím 15 000 Kč za jednoduchý web.",
     "Potřebovala bych upravit web na WordPressu, umí to někdo?",
     "Kolik by stál redesign stránek pro autoservis?",
+    "Looking for a web designer to redo our dental clinic website, budget $2k.",
+    "Need a web designer for my bakery, DM me!",
+    "Can anyone recommend a Shopify developer? Need help with my store.",
+    "ISO someone to build a simple website for my cleaning business?",
 ])
 def test_prefilter_passes_demand(prefilter, text):
     res = prefilter.check(text)
@@ -35,6 +39,10 @@ def test_prefilter_passes_demand(prefilter, text):
     ("Vydělávej s bitcoin! Web s návodem v komentáři, hledám partnery.", "spam_pattern"),
     ("Krásný web, gratuluji k novému e-shopu.", "no_demand"),
     ("web", "too_short"),
+    ("I will build a stunning website for your business, check my portfolio!", "offer_pattern"),
+    ("Need a website? I build fast modern sites starting at $299. DM me", "offer_pattern"),
+    ("Web developer looking for new clients, open for work 🙂", "offer_pattern"),
+    ("Make money online from your website, work from home!", "spam_pattern"),
 ])
 def test_prefilter_rejects(prefilter, text, reason):
     res = prefilter.check(text)
@@ -98,6 +106,11 @@ def test_extract_contacts():
             "skupina https://www.facebook.com/groups/1/")
     c = extract_contacts(text)
     assert c["emails"] == ["jana.novakova@seznam.cz"]
-    assert c["phones"] == ["+420 777 123 456", "602 111 222"]
+    assert c["phones"] == ["+420 777 123 456", "602-111-222"]
     assert c["websites"] == ["www.salon-krasa.cz", "kavarna.cz/menu"]
     assert extract_contacts("Rozpočet 150 000 Kč, do 15. 3.") == {"emails": [], "phones": [], "websites": []}
+
+
+def test_extract_international_phones():
+    c = extract_contacts("Call +1 (415) 555-0132 or 415-555-0199. UK office +44 20 7946 0958. Budget $1,500 by 12/15.")
+    assert c["phones"] == ["+1 (415) 555-0132", "+44 20 7946 0958", "415-555-0199"]

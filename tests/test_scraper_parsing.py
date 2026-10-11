@@ -6,7 +6,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import pytest
 
 from scraper import (
-    canonical_post_url, canonical_profile_url, convert_cookies, extract_post_id, extract_profile_id,
+    build_user_agent, parse_group_links, canonical_post_url, canonical_profile_url, convert_cookies, extract_post_id, extract_profile_id,
     extract_stories, group_feed_url, parse_fb_time, parse_graphql_payload, search_posts_url,
 )
 
@@ -140,3 +140,24 @@ def test_convert_cookie_editor_export():
 def test_profile_urls(url, pid, canonical):
     assert extract_profile_id(url) == pid
     assert canonical_profile_url(url) == canonical
+
+
+def test_parse_group_links():
+    raw = [
+        {"href": "https://www.facebook.com/groups/feed/", "text": "Váš kanál"},
+        {"href": "https://www.facebook.com/groups/smallbizusa/", "text": ""},
+        {"href": "https://www.facebook.com/groups/smallbizusa/", "text": "Small Business USA\nPoslední aktivita před 2 h"},
+        {"href": "https://www.facebook.com/groups/123456/", "text": "Zobrazit skupinu"},
+        {"href": "https://www.facebook.com/groups/123456/?ref=bookmarks", "text": "Shopify Store Owners"},
+        {"href": "https://www.facebook.com/groups/123456/posts/9/", "text": "nějaký příspěvek"},
+        {"href": "https://www.facebook.com/groups/onlyicon/", "text": ""},
+    ]
+    assert parse_group_links(raw) == [
+        {"name": "Small Business USA", "url": "https://www.facebook.com/groups/smallbizusa/"},
+        {"name": "Shopify Store Owners", "url": "https://www.facebook.com/groups/123456/"},
+    ]
+
+
+def test_build_user_agent_matches_browser_version():
+    ua = build_user_agent("141.0.7390.55")
+    assert "Chrome/141.0.0.0" in ua and "Headless" not in ua

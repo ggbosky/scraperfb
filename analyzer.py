@@ -73,8 +73,13 @@ def _compile_keywords(keywords: list[str]) -> list[tuple[str, re.Pattern[str]]]:
 # Kontakty uvedené přímo v textu příspěvku
 # --------------------------------------------------------------------------
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}", re.I)
-# CZ/SK čísla: 9 číslic (volitelně +420/+421), mobilní i pevné linky
-_PHONE_RE = re.compile(r"(?<![\d+])(?:(?:\+|00)42[01][\s-]?)?[2-9]\d{2}[\s-]?\d{3}[\s-]?\d{3}(?!\d)")
+# Telefony: mezinárodní (+1, +44…), americký formát (555) 123-4567 a CZ/SK 9 číslic.
+# Pořadí je důležité – delší formáty se zkouší první a jejich úseky se už nepřekrývají.
+_PHONE_RES = [
+    re.compile(r"(?<![\w+])\+\d{1,3}[\s.-]?\(?\d{1,4}\)?(?:[\s.-]?\d{2,4}){2,4}(?!\d)"),
+    re.compile(r"(?<![\d+])\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}(?!\d)"),
+    re.compile(r"(?<![\d+])(?:00\d{3}[\s-]?)?[2-9]\d{2}[\s-]?\d{3}[\s-]?\d{3}(?!\d)"),
+]
 _WEB_RE = re.compile(
     r"(?:https?://|www\.)[^\s<>()\"']+|(?<![@\w.-])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:cz|sk|com|eu|net|org|shop|store|info)\b(?:/[^\s<>()\"']*)?",
     re.I)
@@ -83,11 +88,15 @@ _WEB_RE = re.compile(
 def extract_contacts(text: str) -> dict[str, list[str]]:
     """E-maily, telefony a weby, které autor sám uvedl v příspěvku."""
     emails = list(dict.fromkeys(m.group(0).rstrip(".").lower() for m in _EMAIL_RE.finditer(text)))
-    phones = []
-    for m in _PHONE_RE.finditer(text):
-        digits = re.sub(r"\D", "", m.group(0))
-        if len(digits) in (9, 12, 14):
-            phones.append(re.sub(r"[\s-]+", " ", m.group(0).strip()))
+    phones: list[str] = []
+    taken: list[tuple[int, int]] = []
+    for rx in _PHONE_RES:
+        for m in rx.finditer(text):
+            if any(m.start() < end and start < m.end() for start, end in taken):
+                continue
+            if 9 <= len(re.sub(r"\D", "", m.group(0))) <= 15:
+                taken.append(m.span())
+                phones.append(re.sub(r"\s+", " ", m.group(0).strip()))
     websites = []
     for m in _WEB_RE.finditer(_EMAIL_RE.sub(" ", text)):
         w = m.group(0).rstrip(".,;:!?)")
@@ -305,11 +314,14 @@ class LLMClassifier:
                 "messages": messages,
                 "temperature": self.s.llm_temperature,
                 "response_format": {"type": "json_object"},
-                "max_tokens": 600,
+                "max_tokens": self.s.llm_max_tokens,
             },
         )
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        content = resp.json()["choices"][0]["message"].get("content")
+        if not content:
+            raise LLMError("LLM vrátil prázdnou odpověď (zkus zvýšit LLM_MAX_TOKENS v .env)")
+        return content
 
     def _complete(self, messages: list[dict[str, str]], retries: int = 4) -> str:
         last_error: Exception | None = None

@@ -18,6 +18,7 @@ CLI:
   python scraper.py login                      # ruční přihlášení v okně prohlížeče → uloží session
   python scraper.py import-cookies cookies.json  # import cookies exportovaných z prohlížeče
   python scraper.py check                      # ověří, že je session platná
+  python scraper.py groups                     # vypíše skupiny, ve kterých je účet členem
   python scraper.py test <url_skupiny>         # stáhne jednu skupinu a vypíše příspěvky (bez DB)
   python scraper.py test "hledám webaře" --search
 """
@@ -532,6 +533,41 @@ def convert_cookies(raw: Any) -> dict:
     return {"cookies": cookies, "origins": []}
 
 
+def build_user_agent(browser_version: str) -> str:
+    """User-Agent odpovídající skutečné verzi prohlížeče a systému (konzistentní otisk)."""
+    major = (browser_version or "130").split(".")[0]
+    if sys.platform.startswith("win"):
+        system = "Windows NT 10.0; Win64; x64"
+    elif sys.platform == "darwin":
+        system = "Macintosh; Intel Mac OS X 10_15_7"
+    else:
+        system = "X11; Linux x86_64"
+    return (f"Mozilla/5.0 ({system}) AppleWebKit/537.36 (KHTML, like Gecko) "
+            f"Chrome/{major}.0.0.0 Safari/537.36")
+
+
+_RESERVED_GROUP_SLUGS = {"feed", "discover", "joins", "create", "notifications", "search", "category",
+                         "you", "browse", "explore", "learning_content", "suggested"}
+_GROUP_LINK_NOISE = {"zobrazit skupinu", "view group", "zobrazit", "join", "připojit se", "join group",
+                     "připojit se ke skupině", "visit", "navštívit"}
+
+
+def parse_group_links(raw: list[dict]) -> list[dict]:
+    """Z odkazů na stránce "Vaše skupiny" vybere skupiny (název + URL), bez duplicit."""
+    groups: dict[str, dict] = {}
+    for item in raw:
+        m = re.match(r"^/groups/([^/?#]+)/?$", urlparse(item.get("href") or "").path)
+        if not m or m.group(1) in _RESERVED_GROUP_SLUGS:
+            continue
+        slug = m.group(1)
+        lines = [ln.strip() for ln in (item.get("text") or "").splitlines() if ln.strip()]
+        name = next((ln for ln in lines if ln.lower() not in _GROUP_LINK_NOISE and len(ln) >= 2), None)
+        entry = groups.setdefault(slug, {"name": None, "url": f"https://www.facebook.com/groups/{slug}/"})
+        if name and not entry["name"]:
+            entry["name"] = name
+    return [g for g in groups.values() if g["name"]]
+
+
 def _platform_for_ua(ua: str) -> str:
     if "Macintosh" in ua:
         return "MacIntel"
@@ -551,7 +587,7 @@ def _proxy_config(proxy: str) -> dict | None:
     return cfg
 
 
-async def apply_stealth(context: BrowserContext, settings: Settings) -> None:
+async def apply_stealth(context: BrowserContext, settings: Settings, user_agent: str) -> None:
     try:
         from playwright_stealth import Stealth  # playwright-stealth >= 2.0
     except ImportError:
@@ -560,8 +596,8 @@ async def apply_stealth(context: BrowserContext, settings: Settings) -> None:
     lang = settings.locale
     stealth = Stealth(
         navigator_languages_override=(lang, lang.split("-")[0]),
-        navigator_platform_override=_platform_for_ua(settings.user_agent),
-        navigator_user_agent_override=settings.user_agent,
+        navigator_platform_override=_platform_for_ua(user_agent),
+        navigator_user_agent_override=user_agent,
     )
     await stealth.apply_stealth_async(context)
 
@@ -583,6 +619,7 @@ class FacebookScraper:
         self._stories: dict[str, dict] = {}
         self._pending: set[asyncio.Task] = set()
         self._session_ok = True
+        self.user_agent = settings.user_agent
 
     # ---------------------------------------------------------- lifecycle
     async def __aenter__(self) -> "FacebookScraper":
@@ -611,9 +648,10 @@ class FacebookScraper:
         if proxy := _proxy_config(self.s.proxy):
             launch["proxy"] = proxy
         self._browser = await self._pw.chromium.launch(**launch)
+        self.user_agent = self.s.user_agent or build_user_agent(self._browser.version)
         self._context = await self._browser.new_context(
             storage_state=str(state_path) if state_path.exists() else None,
-            user_agent=self.s.user_agent,
+            user_agent=self.user_agent,
             viewport={"width": self.s.viewport_width, "height": self.s.viewport_height},
             screen={"width": self.s.viewport_width, "height": self.s.viewport_height + 100},
             locale=self.s.locale,
@@ -622,7 +660,7 @@ class FacebookScraper:
             device_scale_factor=1,
             extra_http_headers={"Accept-Language": f"{self.s.locale},{self.s.locale.split('-')[0]};q=0.9,en;q=0.7"},
         )
-        await apply_stealth(self._context, self.s)
+        await apply_stealth(self._context, self.s, self.user_agent)
         if self.s.block_media:
             await self._context.route("**/*", self._route_filter)
         self._context.on("response", self._on_response)
@@ -756,6 +794,17 @@ class FacebookScraper:
             await human_scroll(self.page, self.s.viewport_height)
         await human_sleep(2, 6)
 
+    async def joined_groups(self, scrolls: int = 6) -> list[dict]:
+        """Skupiny, ve kterých je účet členem (stránka "Vaše skupiny")."""
+        assert self.page
+        await self._goto("https://www.facebook.com/groups/joins/?nav_source=tab")
+        for _ in range(scrolls):
+            await human_scroll(self.page, self.s.viewport_height)
+        raw = await self.page.evaluate(
+            "() => [...document.querySelectorAll('a[href*=\"/groups/\"]')]"
+            ".map(a => ({href: a.href, text: a.innerText || a.getAttribute('aria-label') || ''}))")
+        return parse_group_links(raw)
+
     async def scrape_source(self, url: str, source_type: str = "group", source_name: str = "",
                             is_known: Callable[[Iterable[str]], set[str]] | None = None,
                             cutoff: datetime | None = None) -> list[ScrapedPost]:
@@ -867,7 +916,7 @@ def _clear_session_pause(settings: Settings) -> None:
         print("▶  Pauza workeru zrušena – při příštím cyklu poběží s novou session.")
 
 
-async def cmd_login(settings: Settings) -> None:
+async def cmd_login(settings: Settings) -> bool:
     scraper = FacebookScraper(settings)
     await scraper.start(headless=False, require_session=False)
     try:
@@ -878,11 +927,12 @@ async def cmd_login(settings: Settings) -> None:
         if not await scraper.is_logged_in():
             print("❌ Nevidím přihlašovací cookie c_user – přihlášení se nepovedlo.")
             scraper._session_ok = False
-            return
+            return False
     finally:
         await scraper.close()
     print(f"✅ Session uložena do {settings.storage_state_path}")
     _clear_session_pause(settings)
+    return True
 
 
 def cmd_import_cookies(settings: Settings, path: str) -> None:
@@ -894,11 +944,12 @@ def cmd_import_cookies(settings: Settings, path: str) -> None:
     _clear_session_pause(settings)
 
 
-async def cmd_check(settings: Settings) -> None:
+async def cmd_check(settings: Settings) -> bool:
     async with FacebookScraper(settings) as fb:
         await fb._goto(FB_HOME)
         ok = await fb.is_logged_in()
         print("✅ Session je platná, jsi přihlášený." if ok else "❌ Session není platná.")
+        return ok
 
 
 async def cmd_test(settings: Settings, target: str, search: bool) -> None:
@@ -913,6 +964,14 @@ async def cmd_test(settings: Settings, target: str, search: bool) -> None:
     print(f"\nCelkem {len(posts)} příspěvků.")
 
 
+async def cmd_groups(settings: Settings) -> None:
+    async with FacebookScraper(settings) as fb:
+        groups = await fb.joined_groups()
+    for i, g in enumerate(groups, 1):
+        print(f"{i:>3}. {g['name']}  {g['url']}")
+    print(f"\nCelkem {len(groups)} skupin.")
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="FB Lead Scraper – nástroje pro session a testování")
@@ -921,6 +980,7 @@ def main() -> None:
     imp = sub.add_parser("import-cookies", help="importovat cookies exportované z prohlížeče")
     imp.add_argument("file")
     sub.add_parser("check", help="ověřit platnost session")
+    sub.add_parser("groups", help="vypsat skupiny, ve kterých je účet členem")
     test = sub.add_parser("test", help="stáhnout jednu skupinu/hledání a vypsat příspěvky")
     test.add_argument("target", help="URL skupiny, nebo hledaný výraz s --search")
     test.add_argument("--search", action="store_true")
@@ -934,6 +994,8 @@ def main() -> None:
             cmd_import_cookies(settings, args.file)
         elif args.cmd == "check":
             asyncio.run(cmd_check(settings))
+        elif args.cmd == "groups":
+            asyncio.run(cmd_groups(settings))
         elif args.cmd == "test":
             asyncio.run(cmd_test(settings, args.target, args.search))
     except ScraperError as exc:

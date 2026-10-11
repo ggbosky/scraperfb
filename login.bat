@@ -1,5 +1,6 @@
 @echo off
 chcp 65001 >nul
-call .venv\Scripts\activate.bat
-python scraper.py login
+cd /d "%~dp0"
+set PYTHONIOENCODING=utf-8
+.venv\Scripts\python scraper.py login
 pause
