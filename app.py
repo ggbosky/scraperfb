@@ -107,13 +107,13 @@ with tab_leads:
             "Kdy": fmt_dt(r["posted_at"] or r["scraped_at"]),
             "Skóre": r["score"],
             "Shrnutí": r["summary"] or r["text"][:120],
+            "Stav": r["lead_status"],
+            "Odkaz": r["url"],
             "Rozpočet": r["budget"] or "",
             "Termín": r["deadline"] or "",
-            "Platforma": r["platform"] or "",
             "Zdroj": r["source_name"] or "",
             "Autor": r["author"] or "",
-            "Odkaz": r["url"],
-            "Stav": r["lead_status"],
+            "Platforma": r["platform"] or "",
             "Poznámka": r["notes"] or "",
         } for r in leads]).set_index("id")
 
@@ -124,11 +124,11 @@ with tab_leads:
             height=min(600, 38 + 35 * len(df)),
             disabled=[c for c in df.columns if c not in ("Stav", "Poznámka")],
             column_config={
-                "Skóre": st.column_config.ProgressColumn("Skóre", min_value=0, max_value=10, format="%d"),
+                "Skóre": st.column_config.ProgressColumn("Skóre", min_value=0, max_value=10, format="%d",
+                                                         width="small"),
                 "Odkaz": st.column_config.LinkColumn("Příspěvek", display_text="Otevřít ↗"),
                 "Stav": st.column_config.SelectboxColumn("Stav", options=LEAD_STATUSES, required=True),
-                "Shrnutí": st.column_config.TextColumn(width="large"),
-                "Poznámka": st.column_config.TextColumn(width="medium"),
+                "Shrnutí": st.column_config.TextColumn(width="medium"),
             },
         )
         changed = edited[(edited["Stav"] != df["Stav"]) | (edited["Poznámka"] != df["Poznámka"])]
@@ -190,7 +190,7 @@ with tab_audit:
             "Publikováno": fmt_dt(r["posted_at"]),
             "Důvod": r["reject_reason"] or ("LEAD" if r["is_lead"] else r["analysis_status"]),
             "Záměr": r["intent"] or "",
-            "Skóre": r["score"],
+            "Skóre": r["score"] if r["score"] is not None else "",
             "Text": r["text"][:200].replace("\n", " "),
             "Zdroj": r["source_name"] or "",
             "Odkaz": r["url"],
@@ -199,7 +199,7 @@ with tab_audit:
         pick = st.multiselect("Filtrovat podle důvodu", reasons)
         if pick:
             adf = adf[adf["Důvod"].isin(pick)]
-        st.dataframe(adf, hide_index=True, height=450, column_config={
+        st.dataframe(adf, hide_index=True, height=min(450, 38 + 35 * len(adf)), column_config={
             "Odkaz": st.column_config.LinkColumn("Příspěvek", display_text="↗"),
             "Text": st.column_config.TextColumn(width="large"),
         })
