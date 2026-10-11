@@ -57,13 +57,15 @@ def test_lead_keeps_author_and_contacts(db, settings):
     assert lead["contact_phones"] == "777 123 456" and lead["contact_emails"] == "servis@example.cz"
 
 
-def test_small_fixes_are_not_leads_by_default(db, settings):
+def test_web_fixes_are_leads_but_unrelated_work_is_not(db, settings):
     notif = FakeNotifier()
     clf = FakeClassifier({"intent": "poptavajici", "is_active": True, "relevance_score": 10,
                           "project_type": "uprava"})
     p = Pipeline(db, settings, clf, notif)
-    assert p.handle(_post("6", "Potřebuji opravit kontaktní formulář na webu, kdo pomůže?")) == "project_type:uprava"
-    assert notif.sent == []
+    assert p.handle(_post("6", "Potřebuji opravit kontaktní formulář na webu, kdo pomůže?")) == "lead"
+    clf.result = {**clf.result, "project_type": "jine"}
+    assert p.handle(_post("7", "Hledám někoho na správu webových reklam, kdo pomůže?")) == "project_type:jine"
+    assert len(notif.sent) == 1
 
 
 def test_offer_and_old_posts_never_reach_llm(db, settings):

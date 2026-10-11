@@ -96,7 +96,8 @@ def test_decide(settings):
     assert decide(_analysis(), None, settings)[0] is True  # ALLOW_UNKNOWN_AGE=true
     assert decide(_analysis(project_type="Landing page"), now, settings) == (True, None)
     assert decide(_analysis(project_type="redesign"), now, settings) == (True, None)
-    assert decide(_analysis(project_type="uprava"), now, settings)[1] == "project_type:uprava"
+    assert decide(_analysis(project_type="uprava"), now, settings) == (True, None)
+    assert decide(_analysis(project_type="jine"), now, settings)[1] == "project_type:jine"
     assert decide(_analysis(project_type=None), now, settings)[1] == "project_type:neuvedeno"
 
 
@@ -114,3 +115,10 @@ def test_extract_contacts():
 def test_extract_international_phones():
     c = extract_contacts("Call +1 (415) 555-0132 or 415-555-0199. UK office +44 20 7946 0958. Budget $1,500 by 12/15.")
     assert c["phones"] == ["+1 (415) 555-0132", "+44 20 7946 0958", "415-555-0199"]
+
+
+def test_marketplace_projects_need_only_topic(prefilter):
+    text = "Corporate website development\n\nWe want a modern 10 page site with a blog. " + "Details. " * 900
+    assert not prefilter.check(text).passed
+    assert prefilter.check(text, marketplace=True).passed
+    assert prefilter.check("Logo design for a bakery, vector files needed.", marketplace=True).reason == "no_topic"

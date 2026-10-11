@@ -14,13 +14,14 @@ from typing import Any, Iterable, Iterator
 
 from config import (
     DEFAULT_DEMAND_KEYWORDS,
+    DEFAULT_SUBREDDITS,
     DEFAULT_NEGATIVE_KEYWORDS,
     DEFAULT_SEARCH_QUERIES,
     DEFAULT_TOPIC_KEYWORDS,
     LEAD_STATUSES,
 )
 
-KEYWORD_KINDS = ("topic", "demand", "negative", "search")
+KEYWORD_KINDS = ("topic", "demand", "negative", "search", "subreddit")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS posts (
@@ -36,6 +37,7 @@ CREATE TABLE IF NOT EXISTS posts (
     contact_emails    TEXT,                      -- kontakty uvedené v textu (oddělené čárkou)
     contact_phones    TEXT,
     contact_websites  TEXT,
+    message_url       TEXT,                      -- kam napsat (Messenger, Reddit zpráva, nabídka na Freelancer)
     text              TEXT NOT NULL,
     content_hash      TEXT NOT NULL,             -- otisk normalizovaného textu (cross-post dedupe)
     posted_at         TEXT,                      -- ISO 8601 UTC, NULL = neznámé
@@ -114,7 +116,7 @@ CREATE TABLE IF NOT EXISTS kv (
 MIGRATIONS = {
     "posts": {
         "author_url": "TEXT", "author_id": "TEXT", "contact_emails": "TEXT",
-        "contact_phones": "TEXT", "contact_websites": "TEXT",
+        "contact_phones": "TEXT", "contact_websites": "TEXT", "message_url": "TEXT",
     },
 }
 
@@ -153,6 +155,7 @@ class PostRecord:
     contact_emails: str | None = None
     contact_phones: str | None = None
     contact_websites: str | None = None
+    message_url: str | None = None
     posted_at: datetime | None = None
     scraped_at: datetime = field(default_factory=utcnow)
 
@@ -191,6 +194,10 @@ class Database:
 
     def seed_defaults(self) -> None:
         """Při prvním spuštění vloží výchozí klíčová slova a vyhledávací dotazy."""
+        if self.get_kv("seeded_subreddits") != "1":
+            if not self.get_keywords("subreddit"):
+                self.set_keywords("subreddit", DEFAULT_SUBREDDITS)
+            self.set_kv("seeded_subreddits", "1")
         if self.get_kv("seeded") == "1":
             return
         defaults = {
@@ -223,14 +230,14 @@ class Database:
             cur = conn.execute(
                 """INSERT OR IGNORE INTO posts
                    (post_key, url, source_type, source_name, source_url, author, author_url,
-                    author_id, contact_emails, contact_phones, contact_websites, text,
+                    author_id, contact_emails, contact_phones, contact_websites, message_url, text,
                     content_hash, posted_at, scraped_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     post.post_key, post.url, post.source_type, post.source_name, post.source_url,
                     post.author, post.author_url, post.author_id, post.contact_emails,
-                    post.contact_phones, post.contact_websites, post.text, post.content_hash,
-                    to_iso(post.posted_at), to_iso(post.scraped_at),
+                    post.contact_phones, post.contact_websites, post.message_url, post.text,
+                    post.content_hash, to_iso(post.posted_at), to_iso(post.scraped_at),
                 ),
             )
             return cur.lastrowid if cur.rowcount else None
@@ -301,9 +308,13 @@ class Database:
 
     # ----------------------------------------------------------------- leads
     def get_leads(self, statuses: list[str] | None = None, min_score: int = 0,
-                  since: datetime | None = None, search: str = "", limit: int = 1000) -> list[dict]:
+                  since: datetime | None = None, search: str = "", limit: int = 1000,
+                  source_types: list[str] | None = None) -> list[dict]:
         sql = "SELECT * FROM posts WHERE is_lead = 1 AND COALESCE(score, 0) >= ?"
         params: list[Any] = [min_score]
+        if source_types:
+            sql += f" AND source_type IN ({','.join('?' * len(source_types))})"
+            params += source_types
         if statuses:
             sql += f" AND lead_status IN ({','.join('?' * len(statuses))})"
             params += statuses

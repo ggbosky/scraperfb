@@ -13,7 +13,7 @@ import streamlit as st
 from analyzer import KeywordPrefilter, LLMClassifier, LLMError, decide
 from config import LEAD_STATUSES, load_settings
 from database import Database, from_iso, utcnow
-from notifier import Notifier, messenger_url
+from notifier import Notifier, contact_label, contact_url
 
 st.set_page_config(page_title="FB Lead Hunter", page_icon="🎯", layout="wide")
 
@@ -44,6 +44,8 @@ def worker_status() -> tuple[str, str]:
     if cooldown and cooldown > utcnow():
         return "🧊 Cooldown", f"do {fmt_dt(db.get_kv('cooldown_until'))}"
     if hb and (utcnow() - hb).total_seconds() < 180:
+        if db.get_kv("fb_paused") == "1":
+            return "🟢 Běží (bez FB)", "Facebook je pozastavený, Reddit a Freelancer.com běží"
         return "🟢 Běží", f"PID {db.get_kv('worker_pid')}"
     return "⚪ Neběží", "spusť `python main.py`"
 
@@ -71,6 +73,16 @@ with st.sidebar:
         db.set_kv("run_now", "1")
         st.toast("Požadavek odeslán workeru")
 
+    if db.get_kv("fb_paused") == "1":
+        st.warning(f"Facebook pozastaven: {db.get_kv('fb_pause_reason') or ''}\n\n"
+                   "Spusť **login.bat** (nové přihlášení), pak ho zapni.")
+        if st.button("Zapnout Facebook"):
+            db.set_kv("fb_paused", None)
+            db.set_kv("fb_pause_reason", None)
+            st.rerun()
+    elif not settings.storage_state_path.exists():
+        st.info("Facebook není přihlášený (login.bat). Reddit a Freelancer.com běží i tak.")
+
     stats = db.stats()
     st.divider()
     st.metric("Leady celkem", stats["leads"],
@@ -91,14 +103,18 @@ tab_leads, tab_audit, tab_sources, tab_keywords, tab_system = st.tabs(
 # Leady
 # ==========================================================================
 with tab_leads:
-    f1, f2, f3, f4 = st.columns([2, 1, 1, 2])
+    SOURCE_LABELS = {"group": "Facebook skupiny", "search": "Facebook hledání", "reddit": "Reddit",
+                     "freelancer": "Freelancer.com"}
+    f1, f5, f2, f3, f4 = st.columns([2, 2, 1, 1, 2])
     statuses = f1.multiselect("Stav", LEAD_STATUSES, default=["Nekontaktováno", "Kontaktováno", "Odpověděli"])
+    source_types = f5.multiselect("Zdroj", list(SOURCE_LABELS), format_func=SOURCE_LABELS.get,
+                                  placeholder="všechny")
     min_score = f2.slider("Min. skóre", 1, 10, 1)
     days = f3.selectbox("Období", [1, 3, 7, 14, 30, 90, 3650], index=3,
                         format_func=lambda d: "vše" if d == 3650 else f"{d} dní")
     search = f4.text_input("Hledat (text, autor, skupina, e-mail, telefon)")
 
-    leads = db.get_leads(statuses=statuses or None, min_score=min_score,
+    leads = db.get_leads(statuses=statuses or None, min_score=min_score, source_types=source_types or None,
                          since=utcnow() - timedelta(days=days), search=search.strip())
     if not leads:
         st.info("Zatím žádné leady. Jakmile worker (`python main.py`) najde poptávku po novém webu nebo "
@@ -111,7 +127,7 @@ with tab_leads:
             "Shrnutí": r["summary"] or r["text"][:120],
             "Stav": r["lead_status"],
             "Autor": r["author"] or "",
-            "Zpráva": messenger_url(r["author_id"]) or r["author_url"],
+            "Zpráva": contact_url(r) or r["author_url"],
             "Telefon": r["contact_phones"] or "",
             "E-mail": r["contact_emails"] or "",
             "Odkaz": r["url"],
@@ -148,7 +164,7 @@ with tab_leads:
         export = pd.DataFrame([{
             "publikovano": fmt_dt(r["posted_at"]), "skore": r["score"], "stav": r["lead_status"],
             "shrnuti": r["summary"], "autor": r["author"], "profil": r["author_url"],
-            "messenger": messenger_url(r["author_id"]), "telefon": r["contact_phones"],
+            "kontakt": contact_url(r), "telefon": r["contact_phones"],
             "email": r["contact_emails"], "web": r["contact_websites"], "rozpocet": r["budget"],
             "termin": r["deadline"], "typ": r["project_type"], "platforma": r["platform"],
             "skupina": r["source_name"], "prispevek": r["url"], "text": r["text"], "poznamka": r["notes"],
@@ -168,8 +184,8 @@ with tab_leads:
                 st.markdown(f"**{r['summary'] or ''}**")
                 st.text_area("Celý text příspěvku", r["text"], height=220, disabled=True, key=f"txt_{sel}")
                 buttons = st.columns(3)
-                if msg := messenger_url(r["author_id"]):
-                    buttons[0].link_button("💬 Napsat zprávu", msg, type="primary")
+                if msg := contact_url(r):
+                    buttons[0].link_button(f"💬 {contact_label(r)}", msg, type="primary")
                 if r["author_url"]:
                     buttons[1].link_button("👤 Profil autora", r["author_url"])
                 if r["url"]:
@@ -286,13 +302,29 @@ with tab_sources:
     else:
         st.info("Zatím žádné skupiny. Přidej první výše.")
 
-    st.subheader("FB Search dotazy")
-    st.caption(f"Každý cyklus se náhodně vybere {settings.max_search_queries_per_cycle} dotazů "
-               "(filtr „Nejnovější příspěvky“). Jeden dotaz na řádek.")
+    st.subheader("Vyhledávací dotazy (Facebook + Reddit)")
+    st.caption(f"Facebook: každý cyklus se náhodně vybere {settings.max_search_queries_per_cycle} dotazů "
+               "(filtr „Nejnovější příspěvky“). Reddit: prohledá se všechny napříč Redditem. "
+               "Jeden dotaz na řádek.")
     q_text = st.text_area("Dotazy", "\n".join(db.get_keywords("search")), height=180, key="queries")
     if st.button("💾 Uložit dotazy"):
         db.set_keywords("search", q_text.splitlines())
         st.success("Uloženo")
+
+    st.subheader("Reddit – subreddity")
+    st.caption("Nové příspěvky v těchto subredditech se čtou každý cyklus (bez přihlášení). "
+               + ("" if settings.reddit_enabled else "**Reddit je vypnutý v .env (REDDIT_ENABLED).** ")
+               + "Jeden subreddit na řádek, bez „r/“.")
+    sub_text = st.text_area("Subreddity", "\n".join(db.get_keywords("subreddit")), height=200, key="subreddits")
+    if st.button("💾 Uložit subreddity"):
+        db.set_keywords("subreddit", [x.strip().removeprefix("r/") for x in sub_text.splitlines()])
+        st.success("Uloženo")
+
+    st.subheader("Freelancer.com")
+    st.caption(("Zapnuto" if settings.freelancer_enabled else "Vypnuto (FREELANCER_ENABLED v .env)")
+               + f" – nové zakázky z kategorií webdesign, vývoj webu, WordPress, Shopify, e-shopy, landing pages. "
+               f"Zakázky s rozpočtem pod {settings.freelancer_min_budget_usd:g} USD se přeskakují "
+               "(FREELANCER_MIN_BUDGET_USD v .env). Kontakt = podání nabídky na stránce zakázky.")
 
 # ==========================================================================
 # Klíčová slova

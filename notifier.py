@@ -23,6 +23,16 @@ def messenger_url(author_id: str | None) -> str | None:
     return f"https://www.facebook.com/messages/t/{author_id}" if author_id else None
 
 
+def contact_url(lead: dict[str, Any]) -> str | None:
+    """Kam autorovi napsat: uložený odkaz zdroje, jinak Messenger podle ID profilu."""
+    return lead.get("message_url") or messenger_url(lead.get("author_id"))
+
+
+def contact_label(lead: dict[str, Any]) -> str:
+    return {"freelancer": "Podat nabídku", "reddit": "Napsat na Redditu"}.get(
+        lead.get("source_type") or "", "Napsat zprávu")
+
+
 def _snippet(text: str, limit: int = 600) -> str:
     text = " ".join(text.split())
     return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + " …"
@@ -100,8 +110,8 @@ class Notifier:
         buttons = []
         if lead.get("url"):
             buttons.append({"text": "👉 Příspěvek", "url": lead["url"]})
-        if msg := messenger_url(lead.get("author_id")):
-            buttons.append({"text": "💬 Napsat zprávu", "url": msg})
+        if msg := contact_url(lead):
+            buttons.append({"text": f"💬 {contact_label(lead)}", "url": msg})
         elif lead.get("author_url"):
             buttons.append({"text": "👤 Profil autora", "url": lead["author_url"]})
         return buttons
@@ -117,8 +127,8 @@ class Notifier:
         author = lead.get("author") or "neznámý"
         if lead.get("author_url"):
             author = f"[{author}]({lead['author_url']})"
-        if msg := messenger_url(lead.get("author_id")):
-            author += f" · [💬 napsat zprávu]({msg})"
+        if msg := contact_url(lead):
+            author += f" · [💬 {contact_label(lead).lower()}]({msg})"
         fields.append({"name": "👤 Autor", "value": author[:1024], "inline": False})
         for key, label in (("contact_phones", "📞 Telefon"), ("contact_emails", "📧 E-mail"),
                            ("contact_websites", "🌐 Web"), ("budget", "💰 Rozpočet"),

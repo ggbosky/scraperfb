@@ -91,16 +91,18 @@ class ScrapedPost:
     author: str | None = None
     author_url: str | None = None
     author_id: str | None = None
+    message_url: str | None = None  # odkaz pro kontaktování (Reddit zpráva, nabídka na Freelancer…)
     posted_at: datetime | None = None
-    source_type: str = "group"
+    source_type: str = "group"  # group | search | reddit | freelancer
     source_name: str = ""
     source_url: str = ""
-    origin: str = "dom"  # graphql | ssr | dom
+    origin: str = "dom"  # graphql | ssr | dom | rss | api
+    platform: str = "fb"
 
     @property
     def post_key(self) -> str:
         if self.post_id:
-            return f"fb:{self.post_id}"
+            return f"{self.platform}:{self.post_id}"
         if self.url:
             return f"url:{self.url}"
         return f"hash:{content_hash((self.author or '') + ' ' + self.text)}"
@@ -908,12 +910,12 @@ class FacebookScraper:
 # CLI
 # ==========================================================================
 def _clear_session_pause(settings: Settings) -> None:
-    """Po novém přihlášení zruší pauzu workeru, kterou způsobila vypršelá session."""
+    """Po novém přihlášení znovu zapne Facebook část workeru (pozastavenou kvůli session)."""
     db = Database(settings.db_path)
-    if db.get_kv("paused") == "1" and (db.get_kv("pause_reason") or "").startswith("Session"):
-        db.set_kv("paused", None)
-        db.set_kv("pause_reason", None)
-        print("▶  Pauza workeru zrušena – při příštím cyklu poběží s novou session.")
+    if db.get_kv("fb_paused") == "1":
+        db.set_kv("fb_paused", None)
+        db.set_kv("fb_pause_reason", None)
+        print("▶  Facebook znovu zapnut – při příštím cyklu poběží s novou session.")
 
 
 async def cmd_login(settings: Settings) -> bool:

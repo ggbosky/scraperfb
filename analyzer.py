@@ -134,10 +134,11 @@ class KeywordPrefilter:
     def _hits(patterns: list[tuple[str, re.Pattern[str]]], text: str) -> list[str]:
         return [kw for kw, rx in patterns if rx.search(text)]
 
-    def check(self, text: str) -> PrefilterResult:
+    def check(self, text: str, marketplace: bool = False) -> PrefilterResult:
+        """marketplace=True (Freelancer.com): zakázka je poptávka už z principu, kontroluje se jen téma."""
         if len(text.strip()) < self.min_length:
             return PrefilterResult(False, "too_short")
-        if len(text) > self.max_length:
+        if len(text) > self.max_length and not marketplace:
             return PrefilterResult(False, "too_long")  # dlouhé "eseje" bývají reklamy/nabídky
 
         t = normalize(text)
@@ -157,6 +158,8 @@ class KeywordPrefilter:
             t_without_offers = rx.sub(" ", t_without_offers)
         strong = self._hits(self.strong_demand, t_without_offers)
 
+        if marketplace:
+            return PrefilterResult(True, "ok", topic, demand, negative)
         if negative and not strong:
             return PrefilterResult(False, "offer_pattern", topic, demand, negative)
         if not demand and "?" not in text:

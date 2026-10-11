@@ -1,4 +1,4 @@
-"""Worker: nekonečná smyčka FB → scraper → předfiltr → LLM → SQLite → notifikace.
+"""Worker: nekonečná smyčka (Reddit, Freelancer.com, Facebook) → předfiltr → LLM → SQLite → notifikace.
 
 Spuštění:
   python main.py            # běží trvale (cykly s náhodným rozestupem, jen v aktivních hodinách)
@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 from analyzer import KeywordPrefilter, LLMClassifier, LLMError, decide, extract_contacts
 from config import Settings, load_settings
 from database import Database, PostRecord, from_iso, to_iso, utcnow
-from notifier import Notifier
+from notifier import Notifier, messenger_url
 from scraper import (
     BlockedError,
     CheckpointError,
@@ -31,6 +31,7 @@ from scraper import (
     SessionExpiredError,
     search_posts_url,
 )
+from web_sources import WebSources
 
 log = logging.getLogger("worker")
 
@@ -93,6 +94,7 @@ class Pipeline:
             contact_emails=", ".join(contacts["emails"]) or None,
             contact_phones=", ".join(contacts["phones"]) or None,
             contact_websites=", ".join(contacts["websites"]) or None,
+            message_url=post.message_url or messenger_url(post.author_id),
             posted_at=post.posted_at,
         )
         post_id = self.db.insert_post(record)
@@ -111,7 +113,7 @@ class Pipeline:
             return "too_old"
 
         # 2) Rychlý klíčový předfiltr.
-        pre = self.prefilter.check(row["text"])
+        pre = self.prefilter.check(row["text"], marketplace=row.get("source_type") == "freelancer")
         if not pre.passed:
             self.db.mark_skipped(post_id, f"prefilter:{pre.reason}")
             return f"prefilter:{pre.reason}"
@@ -206,11 +208,40 @@ class Worker:
                 return
             await asyncio.sleep(min(15, remaining))
 
-    def pause(self, reason: str) -> None:
-        self.db.set_kv("paused", "1")
-        self.db.set_kv("pause_reason", reason)
-        log.error("⏸  Worker pozastaven: %s", reason)
-        self.notifier.send_alert(f"Scraper pozastaven: {reason}\nPo vyřešení ho obnov v dashboardu.")
+    def pause_facebook(self, reason: str) -> None:
+        """Pozastaví jen Facebook – Reddit a Freelancer.com běží dál."""
+        self.db.set_kv("fb_paused", "1")
+        self.db.set_kv("fb_pause_reason", reason)
+        log.error("⏸  Facebook pozastaven: %s (ostatní zdroje běží dál)", reason)
+        self.notifier.send_alert(f"Facebook pozastaven: {reason}\nOstatní zdroje běží dál. "
+                                 "Po vyřešení spusť login.bat nebo ho zapni v dashboardu.")
+
+    def handle_posts(self, posts: list[ScrapedPost]) -> None:
+        for post in posts:
+            outcome = self.pipeline.handle(post)
+            if outcome not in ("known", "too_old"):
+                log.debug("  %s → %s", post.post_key, outcome)
+
+    def run_web_sources(self) -> None:
+        """Reddit + Freelancer.com – veřejné zdroje, bez přihlášení a bez rizika pro FB účet."""
+        if not (self.s.reddit_enabled or self.s.freelancer_enabled):
+            return
+        web = WebSources(self.s)
+        try:
+            batches = []
+            if self.s.freelancer_enabled:
+                batches += web.freelancer()
+            if self.s.reddit_enabled:
+                batches += web.reddit(self.db.get_keywords("subreddit"), self.db.get_keywords("search"))
+            for name, posts in batches:
+                self.heartbeat()
+                before = self.pipeline.stats.leads_found
+                self.handle_posts(posts)
+                self.pipeline.stats.sources_scraped += 1
+                log.info("  %s: %d příspěvků, nových leadů %d", name, len(posts),
+                         self.pipeline.stats.leads_found - before)
+        finally:
+            web.close()
 
     # -------------------------------------------------------------- cycle
     async def run_cycle(self) -> None:
@@ -220,12 +251,36 @@ class Worker:
         error = None
         try:
             await asyncio.to_thread(self.pipeline.reanalyze_failed)
-            plan = build_plan(self.db, self.s)
-            if not plan:
-                log.warning("Nejsou nastavené žádné skupiny ani vyhledávací dotazy – přidej je v dashboardu.")
-                return
-            cutoff = utcnow() - timedelta(hours=self.s.max_post_age_hours)
-            log.info("▶ Nový cyklus: %d zdrojů", len(plan))
+            log.info("▶ Nový cyklus")
+            try:
+                await asyncio.to_thread(self.run_web_sources)
+            except Exception:  # noqa: BLE001 – výpadek webového zdroje nesmí zastavit Facebook
+                log.exception("Chyba při čtení Redditu / Freelancer.com")
+            await self.run_facebook(stats)
+        except Exception as exc:  # noqa: BLE001
+            error = repr(exc)
+            log.exception("Neočekávaná chyba v cyklu")
+        finally:
+            self.db.finish_run(run_id, error=error, **stats.__dict__)
+            log.info("■ Cyklus hotov: %s", stats)
+
+    async def run_facebook(self, stats: CycleStats) -> None:
+        if self.db.get_kv("fb_paused") == "1":
+            log.info("Facebook je pozastavený (%s) – přeskakuji", self.db.get_kv("fb_pause_reason"))
+            return
+        cooldown = from_iso(self.db.get_kv("cooldown_until"))
+        if cooldown and cooldown > utcnow():
+            log.info("Facebook v cooldownu po blokaci do %s – přeskakuji", cooldown)
+            return
+        if not self.s.storage_state_path.exists():
+            log.info("Facebook není přihlášený (spusť login.bat) – běží jen ostatní zdroje")
+            return
+        plan = build_plan(self.db, self.s)
+        if not plan:
+            return
+        cutoff = utcnow() - timedelta(hours=self.s.max_post_age_hours)
+        log.info("Facebook: %d zdrojů", len(plan))
+        try:
             async with FacebookScraper(self.s, self.db, heartbeat=self.heartbeat) as fb:
                 await fb.warm_up()
                 for i, src in enumerate(plan):
@@ -248,34 +303,22 @@ class Worker:
                                                   last_scraped_at=to_iso(utcnow()))
                         continue
 
-                    for post in posts:
-                        outcome = await asyncio.to_thread(self.pipeline.handle, post)
-                        if outcome not in ("known", "too_old"):
-                            log.debug("  %s → %s", post.post_key, outcome)
+                    await asyncio.to_thread(self.handle_posts, posts)
 
                     if i < len(plan) - 1:
                         await self.sleep(random.uniform(self.s.pause_between_sources_min_s,
                                                         self.s.pause_between_sources_max_s))
         except RateLimitReached as exc:
-            log.warning("⏳ %s – zbytek cyklu přeskočen", exc)
-            error = str(exc)
+            log.warning("⏳ %s – zbytek Facebooku přeskočen", exc)
         except SessionExpiredError as exc:
-            error = str(exc)
-            self.pause(f"Session vypršela: {exc}")
+            self.pause_facebook(f"Session vypršela: {exc}")
         except CheckpointError as exc:
-            error = str(exc)
-            self.pause(f"Facebook vyžaduje ověření účtu. Přihlas se ručně v prohlížeči a vyřeš ho. ({exc})")
-        except BlockedError as exc:
-            error = str(exc)
+            self.pause_facebook(f"Facebook vyžaduje ověření účtu. Přihlas se ručně v prohlížeči a vyřeš ho. ({exc})")
+        except BlockedError:
             until = utcnow() + timedelta(hours=self.s.blocked_cooldown_hours)
             self.db.set_kv("cooldown_until", to_iso(until))
-            self.notifier.send_alert(f"FB dočasně omezil účet – pauza do {until:%d.%m. %H:%M} UTC.")
-        except Exception as exc:  # noqa: BLE001
-            error = repr(exc)
-            log.exception("Neočekávaná chyba v cyklu")
-        finally:
-            self.db.finish_run(run_id, error=error, **stats.__dict__)
-            log.info("■ Cyklus hotov: %s", stats)
+            self.notifier.send_alert(f"FB dočasně omezil účet – Facebook pauza do {until:%d.%m. %H:%M} UTC, "
+                                     "ostatní zdroje běží dál.")
 
     async def run(self, once: bool = False, force: bool = False) -> None:
         if self.another_worker_running() and not force:
@@ -293,13 +336,6 @@ class Worker:
                         log.warning("Worker je pozastavený (%s)", self.db.get_kv("pause_reason"))
                         return
                     await self.sleep(60)
-                    continue
-                cooldown = from_iso(self.db.get_kv("cooldown_until"))
-                if cooldown and cooldown > utcnow():
-                    log.info("Cooldown po blokaci do %s", cooldown)
-                    if once:
-                        return
-                    await self.sleep(min(600, (cooldown - utcnow()).total_seconds()))
                     continue
                 if self.db.get_kv("run_now") == "1":
                     self.db.set_kv("run_now", None)

@@ -36,6 +36,11 @@ jako webař, nabízí web zdarma do portfolia.
 - Anglické poptávky: "Looking for a web designer", "Need someone to build a website for my \
 bakery", "Can anyone recommend a Shopify developer?", "Hiring: WordPress developer for our site \
 redesign", "ISO web designer" (ISO = in search of) = poptavajici.
+- Reddit: "[Hiring]" / "[Task]" v titulku = poptavajici, "[For Hire]" / "[Offer]" = nabizejici.
+- Freelancer.com (zdroj "Freelancer.com"): zakázka je vždy poptávka klienta (intent poptavajici, \
+is_active true). Hodnoť hlavně, zda jde o tvorbu/úpravu webu a jak je zadání konkrétní; rozpočet \
+je uveden na konci textu. Zakázky typu "sales agent", "lead generation", "data entry", \
+"commission only" nebo práce zdarma = jine, skóre max. 3.
 - PODVODY = spam: "zakázka", kde klient má "consultant / designer, který dodá obsah", chce \
 platit šekem nebo přeplatit a nechat poslat peníze dál, píše jen přes e-mail/SMS, je \
 "hearing impaired", nebo je to zjevně šablonový text bez konkrétní firmy. Skóre 1.

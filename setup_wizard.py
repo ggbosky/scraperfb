@@ -354,6 +354,8 @@ def main() -> int:
         return EXIT_DONT_START
 
     title("Hotovo")
+    print("  Hledá se na Facebooku, Redditu a Freelancer.com. Reddit a Freelancer.com běží")
+    print("  hned, i když zatím nejsi v žádné FB skupině.")
     print("  Dashboard: http://localhost:8501 (otevře se sám po spuštění)")
     print("  Aplikace poběží, dokud necháš otevřené její okno. Ukončíš ji zavřením okna.")
     print("  Příště ji spustíš dvojklikem na start.bat.")

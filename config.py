@@ -96,6 +96,12 @@ class Settings:
     min_relevance_score: int  # lead musí mít skóre STRIKTNĚ větší než tato hodnota
     lead_project_types: tuple[str, ...]  # prázdné = všechny typy projektů
 
+    # --- Další zdroje (mimo Facebook) ---------------------------------------
+    reddit_enabled: bool
+    freelancer_enabled: bool
+    freelancer_min_budget_usd: float
+    freelancer_min_hourly_usd: float
+
     # --- LLM ---------------------------------------------------------------
     llm_provider: str
     llm_base_url: str
@@ -158,8 +164,13 @@ def load_settings() -> Settings:
         allow_unknown_age=_bool("ALLOW_UNKNOWN_AGE", True),
         min_relevance_score=_int("MIN_RELEVANCE_SCORE", 8),
         lead_project_types=tuple(
-            t.strip() for t in _str("LEAD_PROJECT_TYPES", "novy_web,eshop,landing_page,redesign").split(",")
+            t.strip() for t in _str(
+                "LEAD_PROJECT_TYPES", "novy_web,eshop,landing_page,redesign,uprava,sprava,seo_rychlost").split(",")
             if t.strip()),
+        reddit_enabled=_bool("REDDIT_ENABLED", True),
+        freelancer_enabled=_bool("FREELANCER_ENABLED", True),
+        freelancer_min_budget_usd=_float("FREELANCER_MIN_BUDGET_USD", 150),
+        freelancer_min_hourly_usd=_float("FREELANCER_MIN_HOURLY_USD", 15),
         llm_provider=provider,
         llm_base_url=(_str("LLM_BASE_URL") or preset["base_url"]).rstrip("/"),
         llm_api_key=_str("LLM_API_KEY"),
@@ -203,7 +214,7 @@ DEFAULT_DEMAND_KEYWORDS = [
     "kolik si rikate", "zakazk", "subdodavatel", "spolupraci na", "ozve se nekdo",
     "pomuze nekdo", "pomohl by", "pomohla by", "predelat", "upravit web", "uprava webu",
     # EN
-    "looking for", "need a", "need an", "need someone", "need help", "in need of", "seeking",
+    "[hiring]", "[task]", "looking for", "need a", "need an", "need someone", "need help", "in need of", "seeking",
     "hiring", "searching for", "anyone know", "anyone recommend", "can anyone", "could anyone",
     "does anyone", "recommend", "who can", "who could", "quote", "how much would", "how much does",
     "how much should", "budget", "willing to pay", "paid project", "build me", "build my", "redo my",
@@ -216,7 +227,7 @@ STRONG_DEMAND_KEYWORDS = [
     "poptav", "hledam", "hledame", "shanim", "shanime", "potrebuji", "potrebujeme",
     "potreboval bych", "potrebovala bych", "doporucte", "doporucite",
     "looking for", "need a", "need an", "need someone", "in need of", "seeking", "hiring",
-    "searching for", "can anyone recommend", "any recommendations",
+    "searching for", "can anyone recommend", "any recommendations", "[hiring]", "[task]",
 ]
 
 # Nabídky služeb / spam – při shodě (a bez silné poptávky) se příspěvek zahodí bez LLM.
@@ -231,7 +242,7 @@ DEFAULT_NEGATIVE_KEYWORDS = [
     "hledam praci", "hledam brigadu", "hledam klienty", "hledam nove klienty", "hledame klienty",
     "hledame nove klienty", "nabizim se",
     # EN – nabídky služeb (anglické skupiny jsou jimi zahlcené)
-    "i will create", "i will build", "i will design", "i will develop", "i can build", "i can create",
+    "[for hire]", "for hire]", "[offer]", "i will create", "i will build", "i will design", "i will develop", "i can build", "i can create",
     "i can design", "i build websites", "i design websites", "i create websites", "i make websites",
     "we build websites", "we design websites", "we create websites", "our agency", "our team can",
     "we offer", "i offer", "my portfolio", "our portfolio", "check my portfolio", "check my profile",
@@ -276,6 +287,12 @@ SEARCH_QUERIES = {
     ],
 }
 DEFAULT_SEARCH_QUERIES = SEARCH_QUERIES.get(TARGET_MARKET, SEARCH_QUERIES["international"])
+
+# Subreddity, kde lidé shánějí webaře (čtou se přes veřejné RSS, bez přihlášení).
+DEFAULT_SUBREDDITS = [
+    "forhire", "hiring", "freelance_forhire", "jobbit", "DesignJobs", "smallbusiness",
+    "Entrepreneur", "sweatystartup", "shopify", "ecommerce", "Wordpress", "startups",
+]
 
 # Hledané výrazy pro nalezení vhodných FB skupin (průvodce je otevře v prohlížeči).
 GROUP_SEARCH_TERMS = {

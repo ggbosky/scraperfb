@@ -1,6 +1,6 @@
 # 🎯 FB Lead Hunter
 
-Bezplatná alternativa k Apify: hlídá Facebook skupiny a FB vyhledávání, najde **aktivní poptávky po tvorbě nebo redesignu webu**
+Bezplatná alternativa k Apify: hlídá **Facebook skupiny a FB vyhledávání, Reddit a Freelancer.com**, najde **aktivní poptávky po tvorbě, redesignu nebo úpravě webu**
 (ve výchozím nastavení **anglicky psané poptávky ze zahraničí**, přepnutelné na české),
 vyřadí nabídky služeb, spam a staré příspěvky a do pár sekund ti pošle upozornění na Telegram nebo Discord.
 Leady pak spravuješ ve Streamlit dashboardu.
@@ -12,8 +12,21 @@ Leady pak spravuješ ve Streamlit dashboardu.
 - **UI:** Streamlit: leady, stavy (Nekontaktováno / Kontaktováno / Odpověděli / Zamítnuto), skupiny, klíčová slova, audit a testy
 - **Kontakty:** u každého leadu odkaz na FB profil autora, tlačítko „Napsat zprávu“ (Messenger) a telefon, e-mail a web, pokud je autor uvedl v příspěvku. Export do CSV.
 
-Hlásí jen poptávky po **novém webu, e-shopu, landing page nebo redesignu** (`LEAD_PROJECT_TYPES` v `.env`).
-Drobné úpravy, správu webu a SEO vynechává. Když je chceš taky, přidej `uprava,sprava,seo_rychlost`.
+Hlásí poptávky po jakékoli práci na webu: nový web, e-shop, landing page, redesign, úpravy, správa, SEO
+(`LEAD_PROJECT_TYPES` v `.env`). Když chceš jen velké zakázky, nech `novy_web,eshop,landing_page,redesign`.
+
+### Zdroje
+
+| Zdroj | Co čte | Přihlášení | Kontakt na klienta |
+|---|---|---|---|
+| **Facebook** | sledované skupiny + FB vyhledávání | tvůj FB účet (`login.bat`) | Messenger, telefon/e-mail z příspěvku |
+| **Reddit** | nové příspěvky v subredditech (r/forhire, r/smallbusiness, r/shopify…) + hledání napříč Redditem | ne (veřejné RSS) | soukromá zpráva na Redditu |
+| **Freelancer.com** | nové zakázky v kategoriích webdesign, vývoj, WordPress, Shopify, e-shopy, landing pages | ne (veřejné API) | podání nabídky (bid) u zakázky |
+
+Reddit a Freelancer.com běží každý cyklus, i když Facebook ještě není přihlášený nebo je pozastavený. Problém
+s Facebookem (vypršelé přihlášení, checkpoint) pozastaví jen Facebook, ostatní zdroje jedou dál. Na Freelancer.com
+se přeskakují zakázky pod `FREELANCER_MIN_BUDGET_USD` (výchozí 150 USD) a hodinové pod `FREELANCER_MIN_HOURLY_USD` (15 USD/hod).
+V dashboardu filtruješ leady podle zdroje.
 
 ## ⚡ Rychlý start
 
@@ -112,7 +125,8 @@ SQLite (posts, sources, keywords, runs, page_loads, kv)
 | `evaluate.py` | Měření přesnosti předfiltru a LLM na označených vzorcích |
 | `setup_wizard.py` | Průvodce nastavením (AI klíč, prohlížeč, FB přihlášení, výběr skupin, autostart) |
 | `setup.bat`, `start.bat`, `login.bat`, `groups.bat` | Instalace a spouštění na Windows dvojklikem |
-| `tests/` | 78 testů včetně end-to-end běhu Playwrightu proti napodobenině FB |
+| `tests/` | 85 testů včetně end-to-end běhu Playwrightu proti napodobenině FB |
+| `web_sources.py` | Reddit (RSS) a Freelancer.com (API) |
 
 ### Proč čtení GraphQL a ne jen HTML?
 
