@@ -1,0 +1,15 @@
+# Citlivá data – NIKDY necommitovat
+.env
+data/
+*.db
+*.db-wal
+*.db-shm
+fb_state.json
+cookies*.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/

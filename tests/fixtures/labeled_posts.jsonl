@@ -1,0 +1,22 @@
+{"text": "Dobrý den, poptávám tvorbu jednoduchého webu pro kosmetický salon v Olomouci. 4-5 stránek, online rezervace. Rozpočet do 15 tis. Nabídky do SZ, děkuji.", "intent": "poptavajici", "lead": true}
+{"text": "Ahoj holky, znáte někdo šikovného webaře na Shoptet? Potřebuju předělat šablonu a napojit Zásilkovnu, spěchá to 🙏", "intent": "poptavajici", "lead": true}
+{"text": "Hledáme externího vývojáře na redesign firemního webu (WordPress, cca 15 podstránek). Termín do konce listopadu. Fakturace na IČO.", "intent": "poptavajici", "lead": true}
+{"text": "Doporučíte mi prosím někoho, kdo dělá e-shopy? Chci začít prodávat svíčky online.", "intent": "poptavajici", "lead": true}
+{"text": "Potřeboval bych upravit web na WordPressu – nefunguje formulář a chci přidat novou sekci s referencemi. Kdo by to vzal a za kolik?", "intent": "poptavajici", "lead": true}
+{"text": "Sháním někoho na landing page pro náš nový kurz, ideálně ve Webflow. Rozpočet cca 10 000 Kč.", "intent": "poptavajici", "lead": true}
+{"text": "Hledám webaře, nabízím 20 000 Kč za web pro truhlářství. Ozvěte se do zpráv.", "intent": "poptavajici", "lead": true}
+{"text": "Mám volné kapacity na prosinec 🎄 Tvořím moderní weby na WordPressu od 9 990 Kč. Portfolio v komentáři, pište do SZ!", "intent": "nabizejici", "lead": false}
+{"text": "Dělám weby a e-shopy na zakázku, rychle a levně. Reference na vyžádání.", "intent": "nabizejici", "lead": false}
+{"text": "Hledám nové klienty na tvorbu webů, první konzultace zdarma 🙂", "intent": "nabizejici", "lead": false}
+{"text": "Potřebujete nový web? Vytvořím vám ho do 14 dní! Napište mi.", "intent": "nabizejici", "lead": false}
+{"text": "Hledám práci jako junior webdesignér, ovládám Figmu, HTML, CSS a WordPress.", "intent": "nabizejici", "lead": false}
+{"text": "Udělám web zdarma do portfolia, hledám 2-3 zájemce.", "intent": "nabizejici", "lead": false}
+{"text": "Co je lepší pro začínající e-shop, Shoptet nebo WooCommerce? Chci si to udělat sama.", "intent": "diskuse", "lead": false}
+{"text": "Jak si ve Wixu nastavím vlastní doménu? Návod nefunguje, poradí někdo?", "intent": "diskuse", "lead": false}
+{"text": "Kolik si dnes webaři účtují za hodinu? Jen ze zvědavosti, zvažuju rekvalifikaci.", "intent": "diskuse", "lead": false}
+{"text": "EDIT: Už vybráno, děkuji všem! — Hledám někoho na redesign webu pro naši stavební firmu.", "intent": "poptavajici", "lead": false}
+{"text": "Poptávám grafika na logo a vizitky pro novou kavárnu.", "intent": "jine", "lead": false}
+{"text": "Hledáme kolegu/kolegyni na HPP – frontend developer (React), kancelář Praha, plný úvazek.", "intent": "poptavajici", "lead": false}
+{"text": "Vydělávej až 50 000 měsíčně z domova! Web s návodem najdeš v odkazu, bitcoin investice.", "intent": "spam", "lead": false}
+{"text": "Sháním někoho na správu Instagramu a FB reklamy pro náš e-shop.", "intent": "jine", "lead": false}
+{"text": "Prosím o cenovou nabídku na nový web pro autoservis, stávající je z roku 2012 a nefunguje na mobilu.", "intent": "poptavajici", "lead": true}
